@@ -3,7 +3,10 @@
 __pycache__/
 *.pyc
 data/
+y/
 
 .DS_Store
 .idea/
 .vscode/
+
+ask-the-news-d1add4297104.json

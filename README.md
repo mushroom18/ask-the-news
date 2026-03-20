@@ -256,6 +256,12 @@ export TIMELINE_BUCKET_GRANULARITY=week
 export API_BASE_URL=http://127.0.0.1:8000
 export BACKEND_MODE=local
 export ALLOYDB_DSN=
+export ALLOYDB_INSTANCE_URI=
+export ALLOYDB_DB=
+export ALLOYDB_USER=
+export ALLOYDB_PASSWORD=
+export ALLOYDB_IP_TYPE=
+export EMBEDDING_DIMENSION=384
 ```
 
 For broader timeline coverage, use consecutive monthly subsets, for example:
@@ -279,6 +285,65 @@ Recommended production split:
    - connects to the long-term remote database and vector store
 
 This avoids putting database credentials inside the Hugging Face Space and keeps the retrieval backend replaceable.
+
+## AlloyDB schema v1
+
+The first remote schema is defined in [sql/alloydb_schema.sql](/Users/yushu/projects/ask_the_news/sql/alloydb_schema.sql).
+
+It uses three tables:
+
+1. `articles`
+   - canonical article records for featured stories, citations, and timeline rendering
+
+2. `chunks`
+   - chunk-level retrieval units with `embedding_text` and an `embedding` vector column
+
+3. `ingestion_runs`
+   - operational metadata for ingestion tracking
+
+Design goals:
+
+- support tens of thousands of articles and many more chunks
+- keep article-level and chunk-level responsibilities separate
+- allow later hybrid retrieval with metadata filters and text search
+- delay vector ANN index tuning until the embedding pipeline is stable
+
+The schema intentionally avoids event/entity tables for now.
+Those can be added later without changing the core article/chunk contract.
+
+## AlloyDB usage
+
+The project now includes:
+
+- `ask_the_news/alloydb.py`
+- `ask_the_news/backends/alloydb.py`
+- `ask_the_news/admin.py`
+
+Initialize the remote schema:
+
+```bash
+python3 -m ask_the_news.admin init-alloydb
+```
+
+Sync the current local sample and chunks into AlloyDB:
+
+```bash
+python3 -m ask_the_news.admin sync-alloydb
+```
+
+Then switch the backend:
+
+```bash
+export BACKEND_MODE=alloydb
+uvicorn ask_the_news.api:app --reload
+python3 app.py
+```
+
+Important:
+
+- the schema initializer replaces `VECTOR_DIMENSION` with `EMBEDDING_DIMENSION`
+- the AlloyDB backend currently uses exact vector search through PostgreSQL/pgvector
+- ANN index tuning and production-grade AlloyDB optimization still come later
 
 ## What remains
 

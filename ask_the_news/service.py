@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from textwrap import shorten
 
+from ask_the_news.alloydb import AlloyDBConnectionManager
 from ask_the_news.backends.alloydb import AlloyDBArticleRepository, AlloyDBRetrievalBackend
 from ask_the_news.backends.base import ArticleRepository, RetrievalBackend
 from ask_the_news.backends.local import LocalArticleRepository, LocalRetrievalBackend
@@ -14,7 +15,10 @@ from ask_the_news.query_router import build_query_bundle, guardrail_query
 
 def default_backends() -> tuple[ArticleRepository, RetrievalBackend]:
     if BACKEND_MODE == "alloydb":
-        return AlloyDBArticleRepository(dsn=ALLOYDB_DSN), AlloyDBRetrievalBackend(dsn=ALLOYDB_DSN)
+        manager = AlloyDBConnectionManager()
+        repository = AlloyDBArticleRepository(manager=manager, dsn=ALLOYDB_DSN)
+        retriever = AlloyDBRetrievalBackend(repository=repository, manager=manager, dsn=ALLOYDB_DSN)
+        return repository, retriever
     return LocalArticleRepository(), LocalRetrievalBackend()
 
 
@@ -71,9 +75,9 @@ class NewsService:
             return {
                 "ok": False,
                 "blocked": False,
-                "message": "The local vector index is not ready. Run python3 -m ask_the_news.retrieval build-index first.",
+                "message": "The active retrieval backend is not ready.",
                 "query_mode": "error",
-                "route_reason": "Vector index files are missing.",
+                "route_reason": "The active retrieval backend could not confirm index readiness.",
                 "citations": [],
             }
 
@@ -103,9 +107,9 @@ class NewsService:
         if not self.index_ready():
             return {
                 "ok": False,
-                "message": "The local vector index is not ready. Run python3 -m ask_the_news.retrieval build-index first.",
+                "message": "The active retrieval backend is not ready.",
                 "query_mode": "error",
-                "route_reason": "Vector index files are missing.",
+                "route_reason": "The active retrieval backend could not confirm index readiness.",
                 "items": [],
             }
 

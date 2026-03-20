@@ -15,6 +15,12 @@ VECTOR_INDEX_IDS_PATH = Path(os.getenv("VECTOR_INDEX_IDS_PATH", str(DATA_DIR / "
 API_BASE_URL = os.getenv("API_BASE_URL", "").strip()
 BACKEND_MODE = os.getenv("BACKEND_MODE", "local").strip().lower()
 ALLOYDB_DSN = os.getenv("ALLOYDB_DSN", "").strip()
+ALLOYDB_INSTANCE_URI = os.getenv("ALLOYDB_INSTANCE_URI", "").strip()
+ALLOYDB_DB = os.getenv("ALLOYDB_DB", "").strip()
+ALLOYDB_USER = os.getenv("ALLOYDB_USER", "").strip()
+ALLOYDB_PASSWORD = os.getenv("ALLOYDB_PASSWORD", "").strip()
+ALLOYDB_IP_TYPE = os.getenv("ALLOYDB_IP_TYPE", "").strip().lower()
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "384"))
 
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO", "RealTimeData/bbc_news_alltime")
 HF_DATASET_SUBSETS = [item.strip() for item in os.getenv("HF_DATASET_SUBSETS", "").split(",") if item.strip()]

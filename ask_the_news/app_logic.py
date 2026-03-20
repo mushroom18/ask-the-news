@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from html import escape
 from textwrap import shorten
 
@@ -329,7 +330,10 @@ def build_demo() -> gr.Blocks:
                     elem_classes=["headline-list"],
                 )
             with gr.Column(scale=7, elem_classes=["panel"]):
-                chatbot = gr.Chatbot(label="Ask the News")
+                chatbot_kwargs = {"label": "Ask the News"}
+                if "type" in inspect.signature(gr.Chatbot).parameters:
+                    chatbot_kwargs["type"] = "messages"
+                chatbot = gr.Chatbot(**chatbot_kwargs)
                 user_input = gr.Textbox(
                     label="Question",
                     placeholder="Ask about the current story or a broader topic.",

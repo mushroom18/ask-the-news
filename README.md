@@ -1,3 +1,13 @@
+---
+title: Ask the News
+emoji: 📰
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+python_version: "3.10"
+sdk_version: "5.22.0"
+---
+
 # Ask the News
 
 The project has been reset to a clean starting point.
@@ -344,6 +354,35 @@ Important:
 - the schema initializer replaces `VECTOR_DIMENSION` with `EMBEDDING_DIMENSION`
 - the AlloyDB backend currently uses exact vector search through PostgreSQL/pgvector
 - ANN index tuning and production-grade AlloyDB optimization still come later
+
+## Deployment
+
+### Cloud Run backend
+
+The repository now includes [Dockerfile.backend](/Users/yushu/projects/ask_the_news/Dockerfile.backend) for the FastAPI backend.
+
+If you prefer a container-first workflow:
+
+```bash
+gcloud builds submit --config deploy/cloudbuild.backend.yaml
+gcloud run deploy ask-the-news-api \
+  --image gcr.io/PROJECT_ID/ask-the-news-api \
+  --region australia-southeast1 \
+  --allow-unauthenticated \
+  --set-env-vars-file deploy/cloudrun.env.example.yaml
+```
+
+### Hugging Face Space
+
+The root `README.md` now contains the YAML front matter needed for a Gradio Space.
+
+For the Space:
+
+1. push this repository to a Gradio Space
+2. set `API_BASE_URL` in Space Secrets to your Cloud Run HTTPS URL
+3. set `BACKEND_MODE=local` or leave it unset in the Space, because the Space should call the remote API, not connect to AlloyDB directly
+
+The Space only needs the frontend path. The backend stays on GCP.
 
 ## What remains
 

@@ -233,13 +233,6 @@ python3 app.py
 If `API_BASE_URL` is configured, the UI calls the HTTP backend.
 If `API_BASE_URL` is empty, the UI falls back to local in-process service calls.
 
-The backend now supports a pluggable backend mode:
-
-- `BACKEND_MODE=local`
-- `BACKEND_MODE=alloydb`
-
-The AlloyDB backend is currently a stub. The abstraction is in place so the next step can focus on implementing the remote repository and retriever without rewriting the UI or API.
-
 ## Environment variables
 
 ```bash
@@ -264,14 +257,6 @@ export TIMELINE_MAX_ARTICLES=12
 export TIMELINE_MAX_PER_BUCKET=2
 export TIMELINE_BUCKET_GRANULARITY=week
 export API_BASE_URL=http://127.0.0.1:8000
-export BACKEND_MODE=local
-export ALLOYDB_DSN=
-export ALLOYDB_INSTANCE_URI=
-export ALLOYDB_DB=
-export ALLOYDB_USER=
-export ALLOYDB_PASSWORD=
-export ALLOYDB_IP_TYPE=
-export EMBEDDING_DIMENSION=384
 ```
 
 For broader timeline coverage, use consecutive monthly subsets, for example:
@@ -281,108 +266,13 @@ export HF_DATASET_SUBSETS=2024-07,2024-08,2024-09,2024-10,2024-11,2024-12,2025-0
 export MAX_ARTICLES=1200
 ```
 
-## Deployment direction
-
-Recommended production split:
-
-1. Hugging Face Space
-   - hosts the Gradio UI
-   - uses `API_BASE_URL` to call the backend over HTTPS
-
-2. GCP backend
-   - runs `ask_the_news.api:app`
-   - owns retrieval, timeline generation, and LLM calls
-   - connects to the long-term remote database and vector store
-
-This avoids putting database credentials inside the Hugging Face Space and keeps the retrieval backend replaceable.
-
-## AlloyDB schema v1
-
-The first remote schema is defined in [sql/alloydb_schema.sql](/Users/yushu/projects/ask_the_news/sql/alloydb_schema.sql).
-
-It uses three tables:
-
-1. `articles`
-   - canonical article records for featured stories, citations, and timeline rendering
-
-2. `chunks`
-   - chunk-level retrieval units with `embedding_text` and an `embedding` vector column
-
-3. `ingestion_runs`
-   - operational metadata for ingestion tracking
-
-Design goals:
-
-- support tens of thousands of articles and many more chunks
-- keep article-level and chunk-level responsibilities separate
-- allow later hybrid retrieval with metadata filters and text search
-- delay vector ANN index tuning until the embedding pipeline is stable
-
-The schema intentionally avoids event/entity tables for now.
-Those can be added later without changing the core article/chunk contract.
-
-## AlloyDB usage
-
-The project now includes:
-
-- `ask_the_news/alloydb.py`
-- `ask_the_news/backends/alloydb.py`
-- `ask_the_news/admin.py`
-
-Initialize the remote schema:
-
-```bash
-python3 -m ask_the_news.admin init-alloydb
-```
-
-Sync the current local sample and chunks into AlloyDB:
-
-```bash
-python3 -m ask_the_news.admin sync-alloydb
-```
-
-Then switch the backend:
-
-```bash
-export BACKEND_MODE=alloydb
-uvicorn ask_the_news.api:app --reload
-python3 app.py
-```
-
-Important:
-
-- the schema initializer replaces `VECTOR_DIMENSION` with `EMBEDDING_DIMENSION`
-- the AlloyDB backend currently uses exact vector search through PostgreSQL/pgvector
-- ANN index tuning and production-grade AlloyDB optimization still come later
-
 ## Deployment
 
-### Cloud Run backend
+The project is designed to run as a single Hugging Face Space:
 
-The repository now includes [Dockerfile.backend](/Users/yushu/projects/ask_the_news/Dockerfile.backend) for the FastAPI backend.
-
-If you prefer a container-first workflow:
-
-```bash
-gcloud builds submit --config deploy/cloudbuild.backend.yaml
-gcloud run deploy ask-the-news-api \
-  --image gcr.io/PROJECT_ID/ask-the-news-api \
-  --region australia-southeast1 \
-  --allow-unauthenticated \
-  --set-env-vars-file deploy/cloudrun.env.example.yaml
-```
-
-### Hugging Face Space
-
-The root `README.md` now contains the YAML front matter needed for a Gradio Space.
-
-For the Space:
-
-1. push this repository to a Gradio Space
-2. set `API_BASE_URL` in Space Secrets to your Cloud Run HTTPS URL
-3. set `BACKEND_MODE=local` or leave it unset in the Space, because the Space should call the remote API, not connect to AlloyDB directly
-
-The Space only needs the frontend path. The backend stays on GCP.
+- the Gradio UI and the in-process `NewsService` run together
+- when `API_BASE_URL` is unset, the UI falls back to local service calls
+- SQLite + a local vector index serve as the storage layer
 
 ## What remains
 

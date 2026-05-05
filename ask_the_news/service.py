@@ -3,22 +3,15 @@ from __future__ import annotations
 from dataclasses import asdict
 from textwrap import shorten
 
-from ask_the_news.alloydb import AlloyDBConnectionManager
-from ask_the_news.backends.alloydb import AlloyDBArticleRepository, AlloyDBRetrievalBackend
 from ask_the_news.backends.base import ArticleRepository, RetrievalBackend
 from ask_the_news.backends.local import LocalArticleRepository, LocalRetrievalBackend
-from ask_the_news.config import ALLOYDB_DSN, BACKEND_MODE, RETRIEVAL_TOP_K
+from ask_the_news.config import RETRIEVAL_TOP_K
 from ask_the_news.llm import answer_question, generate_timeline
 from ask_the_news.models import Article
 from ask_the_news.query_router import build_query_bundle, guardrail_query
 
 
 def default_backends() -> tuple[ArticleRepository, RetrievalBackend]:
-    if BACKEND_MODE == "alloydb":
-        manager = AlloyDBConnectionManager()
-        repository = AlloyDBArticleRepository(manager=manager, dsn=ALLOYDB_DSN)
-        retriever = AlloyDBRetrievalBackend(repository=repository, manager=manager, dsn=ALLOYDB_DSN)
-        return repository, retriever
     return LocalArticleRepository(), LocalRetrievalBackend()
 
 

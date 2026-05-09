@@ -13,6 +13,7 @@ SQLITE_DB_PATH = Path(os.getenv("SQLITE_DB_PATH", str(DATA_DIR / "news.db")))
 VECTOR_INDEX_PATH = Path(os.getenv("VECTOR_INDEX_PATH", str(DATA_DIR / "chunk_embeddings.npy")))
 VECTOR_INDEX_IDS_PATH = Path(os.getenv("VECTOR_INDEX_IDS_PATH", str(DATA_DIR / "chunk_ids.json")))
 API_BASE_URL = os.getenv("API_BASE_URL", "").strip()
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO", "RealTimeData/bbc_news_alltime")
 HF_DATASET_SUBSETS = [item.strip() for item in os.getenv("HF_DATASET_SUBSETS", "").split(",") if item.strip()]

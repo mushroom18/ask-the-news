@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from textwrap import shorten
 
+from ask_the_news import db
 from ask_the_news.backends.base import ArticleRepository, RetrievalBackend
 from ask_the_news.backends.local import LocalArticleRepository, LocalRetrievalBackend
 from ask_the_news.config import RETRIEVAL_TOP_K
@@ -12,6 +13,11 @@ from ask_the_news.query_router import build_query_bundle, guardrail_query
 
 
 def default_backends() -> tuple[ArticleRepository, RetrievalBackend]:
+    if db.is_configured():
+        from ask_the_news.backends.postgres import PostgresArticleRepository, PostgresRetrievalBackend
+
+        repository = PostgresArticleRepository()
+        return repository, PostgresRetrievalBackend(repository=repository)
     return LocalArticleRepository(), LocalRetrievalBackend()
 
 

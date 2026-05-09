@@ -5,5 +5,7 @@ fastapi>=0.115.0
 python-dotenv>=1.0.1
 numpy>=1.26.4
 openai>=1.66.0
+pgvector>=0.4.0
+psycopg[binary]>=3.2.0
 sentence-transformers>=3.3.1
 uvicorn>=0.34.0

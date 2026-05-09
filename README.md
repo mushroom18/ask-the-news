@@ -233,9 +233,32 @@ python3 app.py
 If `API_BASE_URL` is configured, the UI calls the HTTP backend.
 If `API_BASE_URL` is empty, the UI falls back to local in-process service calls.
 
+## Postgres + pgvector storage
+
+The runtime backend is Postgres with the [pgvector](https://github.com/pgvector/pgvector)
+extension. Any compatible Postgres provider works (this project is currently using
+[Neon](https://neon.tech) on its free tier).
+
+Set `DATABASE_URL` in `.env` and run:
+
+```bash
+python3 -m ask_the_news.admin init-db   # creates pgvector + tables
+python3 -m ask_the_news.admin sync-db   # writes articles + chunks + embeddings
+```
+
+Schema lives in [sql/schema.sql](sql/schema.sql). It defines:
+
+- `articles` — canonical records used for the UI, citations, timeline nodes
+- `chunks` — retrieval units with `embedding vector(384)`
+- `ingestion_runs` — operational metadata for ingestion tracking
+
+When `DATABASE_URL` is unset the project falls back to the local SQLite + `.npy`
+backend, which is convenient for offline development.
+
 ## Environment variables
 
 ```bash
+export DATABASE_URL=postgresql://user:pass@host/dbname?sslmode=require
 export HF_DATASET_REPO=RealTimeData/bbc_news_alltime
 export HF_DATASET_SUBSETS=2025-01,2025-02
 export MAX_ARTICLES=50
@@ -268,11 +291,12 @@ export MAX_ARTICLES=1200
 
 ## Deployment
 
-The project is designed to run as a single Hugging Face Space:
+The project runs as a single Hugging Face Space:
 
-- the Gradio UI and the in-process `NewsService` run together
-- when `API_BASE_URL` is unset, the UI falls back to local service calls
-- SQLite + a local vector index serve as the storage layer
+- the Gradio UI and the in-process `NewsService` share one process
+- when `API_BASE_URL` is unset, the UI talks to the local service directly
+- `DATABASE_URL` (Neon connection string) and `OPENAI_API_KEY` are configured
+  through Space Secrets, never committed to the repo
 
 ## What remains
 

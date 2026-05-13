@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=7860 \
+    HF_HOME=/opt/hf \
+    SENTENCE_TRANSFORMERS_HOME=/opt/hf
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+RUN mkdir -p /opt/hf && \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
+COPY ask_the_news ./ask_the_news
+COPY sql ./sql
+COPY README.md .
+
+EXPOSE 7860
+
+CMD ["sh", "-c", "uvicorn ask_the_news.api:app --host 0.0.0.0 --port ${PORT}"]

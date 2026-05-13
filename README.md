@@ -1,11 +1,10 @@
 ---
-title: Ask the News
+title: Ask the News API
 emoji: 📰
 colorFrom: blue
 colorTo: indigo
-sdk: gradio
-python_version: "3.10"
-sdk_version: "5.22.0"
+sdk: docker
+app_port: 7860
 ---
 
 # Ask the News
@@ -99,9 +98,14 @@ These are not fully wired into retrieval yet, but they define the target contrac
 ```text
 ask_the_news/
   __init__.py
-  app_logic.py
-  api.py
+  admin.py            # CLI: init-db, sync-db
+  api.py              # FastAPI app
+  backends/
+    base.py
+    local.py
+    postgres.py       # pgvector-backed repo + retriever
   config.py
+  db.py               # psycopg connection + schema bootstrap
   embeddings.py
   ingestion.py
   llm.py
@@ -110,8 +114,8 @@ ask_the_news/
   retrieval.py
   service.py
   storage.py
-app.py
-data/sample_articles.json
+sql/schema.sql
+Dockerfile            # Hugging Face Space (sdk: docker)
 requirements.txt
 ```
 
@@ -210,28 +214,26 @@ The project now supports an OpenAI-backed generation layer with a cheap routing 
 
 If an OpenAI call fails, the app falls back to the current extractive answer and timeline output.
 
-## Local backend and UI
+## Backend
 
-The project now has a shared service layer and a FastAPI backend:
+The project exposes a FastAPI backend that owns retrieval, generation,
+and timeline construction.
 
-- `ask_the_news/service.py`
-- `ask_the_news/api.py`
-- `ask_the_news/backends/`
-
-Run the backend locally:
+Run locally:
 
 ```bash
-uvicorn ask_the_news.api:app --reload
+uvicorn ask_the_news.api:app --reload --port 7860
 ```
 
-Run the Gradio UI:
+Endpoints:
 
-```bash
-python3 app.py
-```
+- `GET  /health`
+- `GET  /featured?limit=24`
+- `GET  /article/{article_id}`
+- `POST /query`     `{question, current_article_id, top_k}`
+- `POST /timeline`  `{question, current_article_id}`
 
-If `API_BASE_URL` is configured, the UI calls the HTTP backend.
-If `API_BASE_URL` is empty, the UI falls back to local in-process service calls.
+The frontend (a separate Next.js app) consumes these endpoints over HTTPS.
 
 ## Postgres + pgvector storage
 
@@ -248,7 +250,7 @@ python3 -m ask_the_news.admin sync-db   # writes articles + chunks + embeddings
 
 Schema lives in [sql/schema.sql](sql/schema.sql). It defines:
 
-- `articles` — canonical records used for the UI, citations, timeline nodes
+- `articles` — canonical records used for featured stories, citations, timeline nodes
 - `chunks` — retrieval units with `embedding vector(384)`
 - `ingestion_runs` — operational metadata for ingestion tracking
 
@@ -279,7 +281,7 @@ export TIMELINE_RECALL_K=30
 export TIMELINE_MAX_ARTICLES=12
 export TIMELINE_MAX_PER_BUCKET=2
 export TIMELINE_BUCKET_GRANULARITY=week
-export API_BASE_URL=http://127.0.0.1:8000
+export CORS_ALLOW_ORIGINS=http://localhost:3000,https://your-frontend.vercel.app
 ```
 
 For broader timeline coverage, use consecutive monthly subsets, for example:
@@ -291,12 +293,19 @@ export MAX_ARTICLES=1200
 
 ## Deployment
 
-The project runs as a single Hugging Face Space:
+The backend is deployed to a Hugging Face Space using the `docker` SDK
+(see [Dockerfile](Dockerfile)). On every push to the Space remote, HF
+rebuilds the image and serves `uvicorn` on port 7860.
 
-- the Gradio UI and the in-process `NewsService` share one process
-- when `API_BASE_URL` is unset, the UI talks to the local service directly
-- `DATABASE_URL` (Neon connection string) and `OPENAI_API_KEY` are configured
-  through Space Secrets, never committed to the repo
+Required Space secrets:
+
+- `DATABASE_URL` — Neon connection string
+- `OPENAI_API_KEY` — OpenAI key for the routing / QA / timeline models
+- `CORS_ALLOW_ORIGINS` — comma-separated allowed origins (e.g. the
+  Vercel URL of the frontend). Defaults to `localhost:3000` for dev.
+
+The frontend (Next.js) is deployed separately to Vercel and points at
+the Space's public URL via `NEXT_PUBLIC_API_BASE_URL`.
 
 ## What remains
 

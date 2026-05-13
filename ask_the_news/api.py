@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from ask_the_news.service import NewsService
 
 
 app = FastAPI(title="Ask the News API")
+
+_default_origins = "http://localhost:3000,http://127.0.0.1:3000"
+_allow_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", _default_origins).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allow_origins or ["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 service = NewsService()
 
 

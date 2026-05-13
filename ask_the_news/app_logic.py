@@ -338,16 +338,6 @@ html, body, .gradio-container {
 }
 
 /* ------------- Chat panel (single unified component) ------------- */
-.chat-panel,
-.chat-panel > div,
-.chat-panel > .block,
-.chat-panel > [class*="form"] {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
-  width: 100% !important;
-}
-
 .chat-panel {
   background: var(--surface) !important;
   border: 1px solid var(--border) !important;
@@ -355,10 +345,15 @@ html, body, .gradio-container {
   padding: 14px !important;
   box-shadow: var(--shadow-sm) !important;
   height: var(--panel-height);
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
   gap: 10px !important;
 }
 
-/* Direct children: full-width vertical stacking, no inherited chrome */
+/* Direct children fill the panel width and stack vertically.
+   Do NOT touch their internal display/direction — the input row
+   needs to stay flex-row so textbox + send button sit side-by-side. */
 .chat-panel > * {
   width: 100% !important;
   max-width: 100% !important;
@@ -367,16 +362,25 @@ html, body, .gradio-container {
   box-shadow: none !important;
 }
 
-/* Chatbot: respect its Python height, light surface inside */
-.chat-panel .gradio-chatbot,
-.chat-panel [class*="chatbot"] {
-  flex: 0 0 540px !important;
-  min-height: 540px !important;
-  width: 100% !important;
+/* Chatbot wrapper (the first .block child of the chat panel).
+   Use :nth-of-type so this does NOT also hit the suggestion HTML
+   block, which is the second .block child. */
+.chat-panel > .block:first-of-type {
   background: var(--surface) !important;
   border: 1px solid var(--border) !important;
   border-radius: 12px !important;
   color: var(--text) !important;
+}
+
+.chat-panel [role="log"],
+.chat-panel .bubble-wrap {
+  background: var(--surface) !important;
+  border: none !important;
+  color: var(--text) !important;
+}
+.chat-panel .hide-container {
+  overflow: visible !important;
+  min-height: auto !important;
 }
 
 /* Message bubbles: neutral light, user bubble accent-soft */

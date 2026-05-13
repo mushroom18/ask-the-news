@@ -69,7 +69,7 @@ UI_CSS = """
   --accent-soft: #eff6ff;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 4px 12px rgba(17,24,39,0.06);
-  --panel-height: 640px;
+  --panel-height: 720px;
 }
 
 html, body, .gradio-container {
@@ -361,7 +361,9 @@ html, body, .gradio-container {
 /* Chatbot: respect its Python height, light surface inside */
 .chat-panel .gradio-chatbot,
 .chat-panel [class*="chatbot"] {
-  flex: 0 0 auto !important;
+  flex: 0 0 540px !important;
+  min-height: 540px !important;
+  width: 100% !important;
   background: var(--surface) !important;
   border: 1px solid var(--border) !important;
   border-radius: 12px !important;
@@ -973,7 +975,7 @@ def build_demo() -> gr.Blocks:
                 chatbot_kwargs = {
                     "label": "",
                     "show_label": False,
-                    "height": 440,
+                    "height": 540,
                 }
                 if "type" in inspect.signature(gr.Chatbot).parameters:
                     chatbot_kwargs["type"] = "messages"

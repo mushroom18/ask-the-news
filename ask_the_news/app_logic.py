@@ -19,7 +19,7 @@ EMPTY_SOURCES = (
     "<div class='sources-empty'>Ask a question to surface relevant articles.</div>"
 )
 EMPTY_TIMELINE = (
-    "<div class='timeline-empty'>Click <b>Build timeline</b> above to surface related"
+    "<div class='timeline-empty'>Click <b>Build timeline</b> to surface related"
     " coverage on a horizontal time axis.</div>"
 )
 
@@ -38,6 +38,20 @@ window.atnSetArticleId = function(id) {
   setter.call(el, id);
   el.dispatchEvent(new Event('input', { bubbles: true }));
 };
+
+window.atnSetUserInput = function(text) {
+  const root = document.querySelector('#user-input-textbox');
+  if (!root) return;
+  const el = root.querySelector('textarea, input');
+  if (!el) return;
+  const proto = el.tagName === 'TEXTAREA'
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+  setter.call(el, text);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.focus();
+};
 </script>
 """
 
@@ -55,6 +69,7 @@ UI_CSS = """
   --accent-soft: #eff6ff;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 4px 12px rgba(17,24,39,0.06);
+  --panel-height: 640px;
 }
 
 .gradio-container {
@@ -69,7 +84,6 @@ UI_CSS = """
   border-bottom: 1px solid var(--border);
   margin: 0 0 20px;
 }
-
 .ath-header h1 {
   margin: 0;
   font-size: 24px;
@@ -77,14 +91,13 @@ UI_CSS = """
   letter-spacing: -0.02em;
   color: var(--text);
 }
-
 .ath-header p {
   margin: 6px 0 0;
   color: var(--muted);
   font-size: 13px;
 }
 
-/* ------------- Shared news card (carousel + timeline) ------------- */
+/* ------------- Shared news card ------------- */
 .news-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -165,20 +178,28 @@ UI_CSS = """
   text-align: center;
 }
 
-/* ------------- Article view (main left) ------------- */
+/* ------------- Article view (panel, fixed height, scrollable) ------------- */
 .article-view {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 28px 32px;
   box-shadow: var(--shadow-sm);
+  height: var(--panel-height);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.article-view::-webkit-scrollbar { width: 8px; }
+.article-view::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
 }
 .article-hero-img {
   width: 100%;
   border-radius: 12px;
   margin-bottom: 20px;
   display: block;
-  max-height: 360px;
+  max-height: 280px;
   object-fit: cover;
 }
 .article-meta {
@@ -218,10 +239,27 @@ UI_CSS = """
 .article-content {
   font-size: 15px;
   line-height: 1.75;
-  color: #374151;
+  color: #1f2937;
 }
 .article-content p {
   margin: 0 0 16px;
+  color: #1f2937;
+}
+.article-content-more {
+  margin-top: 4px;
+}
+.article-content-more > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+  list-style: none;
+  padding: 8px 0;
+  user-select: none;
+}
+.article-content-more > summary::-webkit-details-marker { display: none; }
+.article-content-more[open] > summary {
+  color: var(--muted);
 }
 .article-source-link {
   display: inline-block;
@@ -241,45 +279,137 @@ UI_CSS = """
   font-size: 14px;
 }
 
-/* ------------- Chat column ------------- */
-.chat-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.chips-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.chips-row button {
+/* ------------- Chat panel (single unified component) ------------- */
+.chat-panel {
   background: var(--surface) !important;
-  color: var(--text) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 999px !important;
-  padding: 6px 14px !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-  white-space: nowrap !important;
-}
-.chips-row button:hover {
-  border-color: var(--accent) !important;
-  color: var(--accent) !important;
+  border-radius: 16px !important;
+  padding: 14px !important;
+  box-shadow: var(--shadow-sm) !important;
+  height: var(--panel-height);
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  overflow: hidden;
 }
 
-/* ------------- Timeline (horizontal) ------------- */
+.chat-panel .gradio-chatbot,
+.chat-panel [class*="chatbot"] {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.chat-panel .suggestions-row {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: 10px;
+  line-height: 1.6;
+}
+.chat-panel .suggestions-row .suggestion-label {
+  font-weight: 600;
+  color: var(--subtle);
+  margin-right: 6px;
+}
+.chat-panel .suggestion-chip {
+  color: var(--accent);
+  cursor: pointer;
+  margin: 0 2px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  display: inline-block;
+  transition: background 0.12s;
+}
+.chat-panel .suggestion-chip:hover {
+  background: var(--accent-soft);
+  text-decoration: underline;
+}
+.chat-panel .suggestion-sep {
+  color: var(--border-strong);
+  margin: 0 4px;
+}
+
+/* Unified input row (textbox + send button look like one bar) */
+.chat-panel .chat-input-row {
+  flex: 0 0 auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 4px 4px 4px 6px;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.chat-panel .chat-input-row:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.chat-panel .chat-input-row textarea,
+.chat-panel .chat-input-row input {
+  border: none !important;
+  background: transparent !important;
+  resize: none !important;
+  box-shadow: none !important;
+  padding: 8px 10px !important;
+  font-size: 14px !important;
+  outline: none !important;
+  min-height: 24px !important;
+  max-height: 80px !important;
+}
+.chat-panel .chat-input-row .gradio-textbox,
+.chat-panel .chat-input-row [class*="textbox"] {
+  border: none !important;
+  background: transparent !important;
+  flex: 1 !important;
+}
+.chat-panel .chat-send button {
+  border-radius: 50% !important;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  padding: 0 !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  background: var(--accent) !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.chat-panel .chat-send button:hover {
+  background: #1d4ed8 !important;
+}
+
+/* Suppress Gradio's internal label / wrapper styling inside the chat panel */
+.chat-panel label,
+.chat-panel .gr-label {
+  display: none !important;
+}
+
+/* ------------- Timeline ------------- */
 .timeline-section {
   margin: 32px 0 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 24px;
+  box-shadow: var(--shadow-sm);
+}
+.timeline-section-header-row {
+  display: flex !important;
+  align-items: center !important;
+  margin-bottom: 12px;
 }
 .timeline-section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 0 4px;
+  flex: 1;
 }
 .timeline-section-header h3 {
-  margin: 0;
+  margin: 0 0 4px;
   font-size: 16px;
   font-weight: 600;
   color: var(--text);
@@ -288,20 +418,18 @@ UI_CSS = """
   font-size: 12px;
   color: var(--muted);
 }
+.timeline-section-header-row button {
+  white-space: nowrap;
+}
 .timeline-horizontal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 24px 8px;
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
+  margin-top: 4px;
 }
 .timeline-track {
   display: flex;
   align-items: stretch;
   overflow-x: auto;
   min-height: 380px;
-  padding: 8px 24px;
+  padding: 8px 16px;
   scrollbar-width: thin;
 }
 .timeline-track::-webkit-scrollbar { height: 8px; }
@@ -367,7 +495,7 @@ UI_CSS = """
 .timeline-empty {
   text-align: center;
   color: var(--muted);
-  padding: 80px 20px;
+  padding: 60px 20px;
   font-size: 14px;
 }
 
@@ -476,10 +604,6 @@ def example_questions(article: Article | None) -> list[str]:
     return LOCAL_SERVICE.example_questions(article)
 
 
-def suggestion_updates(questions: list[str]) -> list[dict]:
-    return [gr.update(value=question) for question in questions]
-
-
 def render_news_card(
     article_id: str,
     title: str,
@@ -543,7 +667,23 @@ def render_article_view(article: Article | None) -> str:
     content_html = ""
     if article.content:
         paragraphs = [paragraph.strip() for paragraph in article.content.split("\n") if paragraph.strip()]
-        content_html = "\n".join(f"<p>{escape(paragraph)}</p>" for paragraph in paragraphs)
+        visible_paragraphs = paragraphs[:2]
+        hidden_paragraphs = paragraphs[2:]
+        visible_html = "\n".join(f"<p>{escape(paragraph)}</p>" for paragraph in visible_paragraphs)
+        if hidden_paragraphs:
+            hidden_html = "\n".join(f"<p>{escape(paragraph)}</p>" for paragraph in hidden_paragraphs)
+            content_html = (
+                f"<div class='article-content'>"
+                f"{visible_html}"
+                f"<details class='article-content-more'>"
+                f"<summary>Continue reading ({len(hidden_paragraphs)} more paragraph"
+                f"{'s' if len(hidden_paragraphs) != 1 else ''}) ↓</summary>"
+                f"{hidden_html}"
+                f"</details>"
+                f"</div>"
+            )
+        else:
+            content_html = f"<div class='article-content'>{visible_html}</div>"
 
     image_html = (
         f"<img class='article-hero-img' src='{top_image}' alt=''>" if top_image else ""
@@ -569,10 +709,30 @@ def render_article_view(article: Article | None) -> str:
         f"<div class='article-meta'>{meta_html}</div>"
         f"<h2>{title}</h2>"
         f"{description_html}"
-        f"<div class='article-content'>{content_html}</div>"
+        f"{content_html}"
         f"<a class='article-source-link' href='{url}' target='_blank' rel='noopener'>"
         f"Read on {source_label} ↗</a>"
         f"</article>"
+    )
+
+
+def render_suggestions(questions: list[str]) -> str:
+    if not questions:
+        return ""
+    chips = []
+    for question in questions[:4]:
+        question_escaped_html = escape(question)
+        question_escaped_js = question.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+        chips.append(
+            f"<span class='suggestion-chip' onclick=\"atnSetUserInput('{question_escaped_js}')\">"
+            f"{question_escaped_html}</span>"
+        )
+    separator = "<span class='suggestion-sep'>·</span>"
+    return (
+        "<div class='suggestions-row'>"
+        "<span class='suggestion-label'>💡 Try:</span>"
+        + separator.join(chips)
+        + "</div>"
     )
 
 
@@ -630,12 +790,6 @@ def render_timeline(items: list[TimelineItem]) -> str:
         cells.append(f"<div class='timeline-item'>{inner}</div>")
 
     return f"<div class='timeline-horizontal'><div class='timeline-track'>{''.join(cells)}</div></div>"
-
-
-def use_example(questions: list[str], index: int) -> str:
-    if 0 <= index < len(questions):
-        return questions[index]
-    return ""
 
 
 def ask_question(user_query, history, current_article_id):
@@ -710,36 +864,42 @@ def build_demo() -> gr.Blocks:
             with gr.Column(scale=6):
                 article_view = gr.HTML(value=render_article_view(selected_article))
 
-            with gr.Column(scale=4, elem_classes=["chat-col"]):
-                chatbot_kwargs = {"label": "Conversation", "height": 360}
+            with gr.Column(scale=4, elem_classes=["chat-panel"]):
+                chatbot_kwargs = {"label": "", "show_label": False}
                 if "type" in inspect.signature(gr.Chatbot).parameters:
                     chatbot_kwargs["type"] = "messages"
                 chatbot = gr.Chatbot(**chatbot_kwargs)
 
-                with gr.Row(elem_classes=["chips-row"]):
-                    suggestion_one = gr.Button(questions[0], size="sm")
-                    suggestion_two = gr.Button(questions[1], size="sm")
-                    suggestion_three = gr.Button(questions[2], size="sm")
-                    suggestion_four = gr.Button(questions[3], size="sm")
+                suggestion_html = gr.HTML(value=render_suggestions(questions))
 
-                user_input = gr.Textbox(
-                    placeholder="Ask about this story or a broader topic...",
-                    show_label=False,
-                )
-
-                with gr.Row():
-                    send_button = gr.Button("Send", variant="primary")
-                    timeline_button = gr.Button("Build timeline")
-
-                suggestion_state = gr.State(questions)
+                with gr.Row(elem_classes=["chat-input-row"]):
+                    user_input = gr.Textbox(
+                        placeholder="Ask about this story or a broader topic...",
+                        show_label=False,
+                        container=False,
+                        elem_id="user-input-textbox",
+                        scale=10,
+                        lines=1,
+                        max_lines=3,
+                    )
+                    send_button = gr.Button(
+                        "↑",
+                        variant="primary",
+                        scale=0,
+                        min_width=44,
+                        elem_classes=["chat-send"],
+                    )
 
         with gr.Group(elem_classes=["timeline-section"]):
-            gr.HTML(
-                "<div class='timeline-section-header'>"
-                "<h3>Timeline</h3>"
-                "<span class='timeline-section-hint'>Click a card to switch the current story.</span>"
-                "</div>"
-            )
+            with gr.Row(elem_classes=["timeline-section-header-row"]):
+                gr.HTML(
+                    "<div class='timeline-section-header'>"
+                    "<h3>Timeline</h3>"
+                    "<span class='timeline-section-hint'>Click a card to switch the current story.</span>"
+                    "</div>",
+                    elem_classes=["timeline-header-html"],
+                )
+                timeline_button = gr.Button("Build timeline", variant="primary", scale=0, min_width=160)
             timeline_output = gr.HTML(value=EMPTY_TIMELINE)
 
         with gr.Accordion("Sources", open=False, elem_classes=["sources-section"]):
@@ -751,7 +911,7 @@ def build_demo() -> gr.Blocks:
             return (
                 render_carousel(articles_list, active_id=article_id),
                 render_article_view(article),
-                new_questions,
+                render_suggestions(new_questions),
                 EMPTY_CHAT,
                 "",
                 EMPTY_SOURCES,
@@ -764,22 +924,13 @@ def build_demo() -> gr.Blocks:
             outputs=[
                 carousel_html,
                 article_view,
-                suggestion_state,
+                suggestion_html,
                 chatbot,
                 user_input,
                 sources_output,
                 timeline_output,
             ],
-        ).then(
-            fn=lambda q: suggestion_updates(q),
-            inputs=[suggestion_state],
-            outputs=[suggestion_one, suggestion_two, suggestion_three, suggestion_four],
         )
-
-        suggestion_one.click(fn=lambda q: use_example(q, 0), inputs=[suggestion_state], outputs=[user_input])
-        suggestion_two.click(fn=lambda q: use_example(q, 1), inputs=[suggestion_state], outputs=[user_input])
-        suggestion_three.click(fn=lambda q: use_example(q, 2), inputs=[suggestion_state], outputs=[user_input])
-        suggestion_four.click(fn=lambda q: use_example(q, 3), inputs=[suggestion_state], outputs=[user_input])
 
         send_button.click(
             fn=ask_question,

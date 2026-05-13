@@ -12,123 +12,419 @@ from ask_the_news.models import Article, Citation, TimelineItem
 from ask_the_news.service import NewsService
 
 
-EMPTY_SOURCES = "### Sources\n\nNo sources yet."
-EMPTY_TIMELINE = "<div class='timeline-empty'>Build a timeline to see related coverage.</div>"
-EMPTY_CHAT: list[dict[str, str]] = []
 LOCAL_SERVICE = NewsService()
 
-UI_CSS = """
-.app-shell {
-  background:
-    radial-gradient(circle at top left, rgba(201, 227, 255, 0.8), transparent 32%),
-    linear-gradient(180deg, #f8fafc 0%, #eef4f7 100%);
-}
-.panel {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid #d8e3ea;
-  border-radius: 20px;
-  box-shadow: 0 18px 40px rgba(38, 60, 77, 0.08);
-}
-.featured-card {
-  padding: 22px;
-}
-.featured-card .eyebrow {
-  color: #516475;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.featured-card h2 {
-  color: #10202f;
-  font-size: 30px;
-  line-height: 1.15;
-  margin: 10px 0 12px;
-}
-.featured-meta {
-  color: #566778;
-  font-size: 14px;
-  margin-bottom: 16px;
-}
-.featured-summary {
-  color: #22384a;
-  font-size: 15px;
-  line-height: 1.65;
-}
-.featured-link {
-  display: inline-block;
-  margin-top: 18px;
-  color: #0a5c7a;
-  font-weight: 600;
-  text-decoration: none;
-}
-.headline-list {
-  max-height: 420px;
-  overflow-y: auto;
-  padding: 6px;
-}
-.headline-list label {
-  border-radius: 14px;
-  margin-bottom: 8px;
-}
-.headline-list label:hover {
-  background: rgba(229, 240, 245, 0.8);
-}
-.headline-hint {
-  color: #607385;
-  font-size: 13px;
-  margin-bottom: 10px;
-}
-.question-grid {
-  gap: 10px;
-}
-.timeline-strip {
-  display: flex;
-  gap: 14px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-}
-.timeline-card {
-  min-width: 240px;
-  max-width: 260px;
-  background: linear-gradient(180deg, #fbfdff 0%, #edf5f8 100%);
-  border: 1px solid #d7e5eb;
-  border-radius: 16px;
-  padding: 16px;
-}
-.timeline-date {
-  color: #0a5c7a;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.timeline-card h4 {
-  color: #10202f;
-  font-size: 16px;
-  line-height: 1.35;
-  margin: 8px 0 10px;
-}
-.timeline-card p {
-  color: #3a4f60;
-  font-size: 14px;
-  line-height: 1.55;
-  margin: 0 0 12px;
-}
-.timeline-card a {
-  color: #0a5c7a;
-  font-weight: 600;
-  text-decoration: none;
-}
-.timeline-empty {
-  color: #607385;
-  padding: 10px 2px;
-}
+EMPTY_CHAT: list[dict[str, str]] = []
+EMPTY_SOURCES = (
+    "<div class='sources-empty'>Ask a question to surface relevant articles.</div>"
+)
+EMPTY_TIMELINE = (
+    "<div class='timeline-empty'>Click <b>Build timeline</b> above to surface related"
+    " coverage on a horizontal time axis.</div>"
+)
+
+
+HEAD_HTML = """
+<script>
+window.atnSetArticleId = function(id) {
+  const root = document.querySelector('#selected-article-id');
+  if (!root) return;
+  const el = root.querySelector('textarea, input');
+  if (!el) return;
+  const proto = el.tagName === 'TEXTAREA'
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+  setter.call(el, id);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+};
+</script>
 """
 
 
-def article_label(article: Article) -> str:
-    return f"{shorten(article.title, width=74, placeholder='...')} | {article.published_at}"
+UI_CSS = """
+:root {
+  --bg: #f9fafb;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text: #111827;
+  --muted: #6b7280;
+  --subtle: #4b5563;
+  --accent: #2563eb;
+  --accent-soft: #eff6ff;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(17,24,39,0.06);
+}
+
+.gradio-container {
+  background: var(--bg) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, "Helvetica Neue", Arial, system-ui, sans-serif !important;
+  color: var(--text);
+  max-width: 1320px !important;
+}
+
+.ath-header {
+  padding: 28px 4px 16px;
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 20px;
+}
+
+.ath-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.ath-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ------------- Shared news card (carousel + timeline) ------------- */
+.news-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
+}
+.news-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.news-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.news-card .news-card-section {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.news-card .news-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-card .news-card-snippet {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--subtle);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-card .news-card-date {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+/* ------------- Featured carousel ------------- */
+.carousel {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 4px 4px 16px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+.carousel::-webkit-scrollbar { height: 8px; }
+.carousel::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.carousel .news-card {
+  flex: 0 0 240px;
+  scroll-snap-align: start;
+}
+.carousel-empty {
+  color: var(--muted);
+  padding: 20px;
+  text-align: center;
+}
+
+/* ------------- Article view (main left) ------------- */
+.article-view {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 32px;
+  box-shadow: var(--shadow-sm);
+}
+.article-hero-img {
+  width: 100%;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  display: block;
+  max-height: 360px;
+  object-fit: cover;
+}
+.article-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.article-section-tag {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+.article-view h2 {
+  margin: 0 0 16px;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.article-description {
+  font-size: 17px;
+  line-height: 1.6;
+  color: #1f2937;
+  margin: 0 0 20px;
+  font-weight: 500;
+}
+.article-content {
+  font-size: 15px;
+  line-height: 1.75;
+  color: #374151;
+}
+.article-content p {
+  margin: 0 0 16px;
+}
+.article-source-link {
+  display: inline-block;
+  margin-top: 24px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 14px;
+}
+.article-source-link:hover {
+  text-decoration: underline;
+}
+.article-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 60px 20px;
+  font-size: 14px;
+}
+
+/* ------------- Chat column ------------- */
+.chat-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chips-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chips-row button {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 999px !important;
+  padding: 6px 14px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  white-space: nowrap !important;
+}
+.chips-row button:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+/* ------------- Timeline (horizontal) ------------- */
+.timeline-section {
+  margin: 32px 0 0;
+}
+.timeline-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+.timeline-section-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.timeline-section-header .timeline-section-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.timeline-horizontal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px 8px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.timeline-track {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  min-height: 380px;
+  padding: 8px 24px;
+  scrollbar-width: thin;
+}
+.timeline-track::-webkit-scrollbar { height: 8px; }
+.timeline-track::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto auto 1fr;
+  width: 240px;
+  flex-shrink: 0;
+  margin: 0 10px;
+}
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  margin-top: -7px;
+  height: 2px;
+  background: var(--border);
+  z-index: 0;
+}
+.timeline-cell {
+  display: flex;
+  z-index: 1;
+}
+.timeline-cell.top {
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 14px;
+}
+.timeline-cell.bottom {
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14px;
+}
+.timeline-cell .news-card {
+  flex: none;
+  width: 100%;
+  min-height: 120px;
+}
+.timeline-marker {
+  width: 14px;
+  height: 14px;
+  background: var(--surface);
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  margin: 0 auto;
+  z-index: 2;
+  position: relative;
+}
+.timeline-date {
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-top: 6px;
+}
+.timeline-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 80px 20px;
+  font-size: 14px;
+}
+
+/* ------------- Sources (footer accordion) ------------- */
+.sources-section {
+  margin-top: 24px;
+}
+.sources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 4px;
+}
+.source-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.source-card .source-index {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+.source-card .source-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.source-card .source-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+.source-card .source-title a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.source-card .source-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.source-card .source-snippet {
+  font-size: 12.5px;
+  color: var(--subtle);
+  line-height: 1.55;
+}
+.sources-empty {
+  color: var(--muted);
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+}
+"""
 
 
 def article_from_dict(payload: dict) -> Article:
@@ -146,7 +442,6 @@ def timeline_item_from_dict(payload: dict) -> TimelineItem:
 def request_api(method: str, path: str, payload: dict | None = None) -> dict | None:
     if not API_BASE_URL:
         return None
-
     url = f"{API_BASE_URL.rstrip('/')}{path}"
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -177,32 +472,6 @@ def initial_article_id(articles: list[Article]) -> str:
     return articles[0].article_id if articles else ""
 
 
-def render_featured_card(article: Article | None) -> str:
-    if article is None:
-        return (
-            "<div class='featured-card'>"
-            "<div class='eyebrow'>No story loaded</div>"
-            "<h2>Import articles and sync SQLite to start.</h2>"
-            "<p class='featured-summary'>Run the ingestion pipeline, then rebuild the local vector index.</p>"
-            "</div>"
-        )
-
-    section = escape(article.section or "General")
-    title = escape(article.title)
-    summary = escape(shorten(article.summary_text, width=520, placeholder="..."))
-    url = escape(article.url)
-    published = escape(article.published_at)
-    return (
-        "<div class='featured-card'>"
-        f"<div class='eyebrow'>{section}</div>"
-        f"<h2>{title}</h2>"
-        f"<div class='featured-meta'>{published}</div>"
-        f"<div class='featured-summary'>{summary}</div>"
-        f"<a class='featured-link' href='{url}' target='_blank'>Open source article</a>"
-        "</div>"
-    )
-
-
 def example_questions(article: Article | None) -> list[str]:
     return LOCAL_SERVICE.example_questions(article)
 
@@ -211,51 +480,156 @@ def suggestion_updates(questions: list[str]) -> list[dict]:
     return [gr.update(value=question) for question in questions]
 
 
+def render_news_card(
+    article_id: str,
+    title: str,
+    date: str,
+    section: str = "",
+    snippet: str = "",
+    active: bool = False,
+) -> str:
+    section_html = escape(section.upper()) if section else "STORY"
+    title_html = escape(shorten(title, width=110, placeholder="..."))
+    snippet_html = escape(shorten(snippet, width=120, placeholder="...")) if snippet else ""
+    snippet_block = f"<div class='news-card-snippet'>{snippet_html}</div>" if snippet_html else ""
+    active_class = " active" if active else ""
+    aid = escape(article_id)
+    return (
+        f"<article class='news-card{active_class}' "
+        f"onclick=\"atnSetArticleId('{aid}')\" "
+        f"data-article-id='{aid}'>"
+        f"<div class='news-card-section'>{section_html}</div>"
+        f"<div class='news-card-title'>{title_html}</div>"
+        f"{snippet_block}"
+        f"<div class='news-card-date'>{escape(date)}</div>"
+        f"</article>"
+    )
+
+
+def render_carousel(articles: list[Article], active_id: str = "") -> str:
+    if not articles:
+        return "<div class='carousel-empty'>No featured stories yet.</div>"
+    cards = [
+        render_news_card(
+            article_id=article.article_id,
+            title=article.title,
+            date=article.published_at,
+            section=article.section or "News",
+            active=article.article_id == active_id,
+        )
+        for article in articles
+    ]
+    return f"<div class='carousel'>{''.join(cards)}</div>"
+
+
+def render_article_view(article: Article | None) -> str:
+    if article is None:
+        return (
+            "<div class='article-view'>"
+            "<div class='article-empty'>"
+            "Pick a story from the carousel above to start reading."
+            "</div></div>"
+        )
+
+    section = escape((article.section or "General").upper())
+    title = escape(article.title)
+    description = escape(article.description) if article.description else ""
+    published = escape(article.published_at)
+    authors = escape(", ".join(article.authors)) if article.authors else ""
+    source = escape(article.source or "")
+    url = escape(article.url)
+    top_image = escape(article.top_image) if article.top_image else ""
+
+    content_html = ""
+    if article.content:
+        paragraphs = [paragraph.strip() for paragraph in article.content.split("\n") if paragraph.strip()]
+        content_html = "\n".join(f"<p>{escape(paragraph)}</p>" for paragraph in paragraphs)
+
+    image_html = (
+        f"<img class='article-hero-img' src='{top_image}' alt=''>" if top_image else ""
+    )
+    description_html = (
+        f"<p class='article-description'>{description}</p>" if description else ""
+    )
+
+    meta_parts = [
+        f"<span class='article-section-tag'>{section}</span>",
+        f"<span>{published}</span>",
+    ]
+    if authors:
+        meta_parts.append(f"<span>By {authors}</span>")
+    if source:
+        meta_parts.append(f"<span>· {source}</span>")
+    meta_html = "".join(meta_parts)
+
+    source_label = escape(article.source or "source")
+    return (
+        f"<article class='article-view'>"
+        f"{image_html}"
+        f"<div class='article-meta'>{meta_html}</div>"
+        f"<h2>{title}</h2>"
+        f"{description_html}"
+        f"<div class='article-content'>{content_html}</div>"
+        f"<a class='article-source-link' href='{url}' target='_blank' rel='noopener'>"
+        f"Read on {source_label} ↗</a>"
+        f"</article>"
+    )
+
+
 def render_sources(citations: list[Citation]) -> str:
     if not citations:
         return EMPTY_SOURCES
-    lines = ["### Sources", ""]
-    for citation in citations:
-        title = citation.title.replace("\n", " ").strip()
-        snippet = shorten(citation.snippet.replace("\n", " ").strip(), width=180, placeholder="...")
-        lines.append(f"- [{title}]({citation.url}) | {citation.published_at}")
-        if snippet:
-            lines.append(f"  {snippet}")
-    return "\n".join(lines)
+    cards = []
+    for index, citation in enumerate(citations, start=1):
+        title = escape(citation.title.replace("\n", " ").strip())
+        snippet = escape(
+            shorten(citation.snippet.replace("\n", " ").strip(), width=200, placeholder="...")
+        )
+        url = escape(citation.url)
+        date = escape(citation.published_at)
+        source = escape(citation.source or "")
+        cards.append(
+            "<div class='source-card'>"
+            f"<div class='source-index'>SOURCE {index}</div>"
+            f"<div class='source-title'><a href='{url}' target='_blank' rel='noopener'>{title}</a></div>"
+            f"<div class='source-meta'>{date}{' · ' + source if source else ''}</div>"
+            f"<div class='source-snippet'>{snippet}</div>"
+            "</div>"
+        )
+    return f"<div class='sources-grid'>{''.join(cards)}</div>"
 
 
 def render_timeline(items: list[TimelineItem]) -> str:
     if not items:
         return EMPTY_TIMELINE
 
-    cards = []
-    for item in items[:10]:
-        title = escape(item.title)
-        summary = escape(shorten(item.summary, width=220, placeholder="..."))
-        date = escape(item.published_at)
-        url = escape(item.url)
-        cards.append(
-            "<article class='timeline-card'>"
-            f"<div class='timeline-date'>{date}</div>"
-            f"<h4>{title}</h4>"
-            f"<p>{summary}</p>"
-            f"<a href='{url}' target='_blank'>Read article</a>"
-            "</article>"
+    cells = []
+    for index, item in enumerate(items[:10]):
+        position = "top" if index % 2 == 0 else "bottom"
+        card = render_news_card(
+            article_id=item.article_id,
+            title=item.title,
+            date=item.published_at,
+            section="Timeline",
+            snippet=item.summary,
         )
-    return f"<div class='timeline-strip'>{''.join(cards)}</div>"
+        if position == "top":
+            inner = (
+                f"<div class='timeline-cell top'>{card}</div>"
+                f"<div class='timeline-marker'></div>"
+                f"<div class='timeline-date'>{escape(item.published_at)}</div>"
+                f"<div class='timeline-cell bottom'></div>"
+            )
+        else:
+            inner = (
+                f"<div class='timeline-cell top'></div>"
+                f"<div class='timeline-marker'></div>"
+                f"<div class='timeline-date'>{escape(item.published_at)}</div>"
+                f"<div class='timeline-cell bottom'>{card}</div>"
+            )
+        cells.append(f"<div class='timeline-item'>{inner}</div>")
 
-
-def load_article_view(article_id: str) -> tuple[str, list[str], list[dict[str, str]], str, str, str]:
-    article = get_article(article_id)
-    questions = example_questions(article)
-    return (
-        render_featured_card(article),
-        questions,
-        EMPTY_CHAT,
-        "",
-        EMPTY_SOURCES,
-        EMPTY_TIMELINE,
-    )
+    return f"<div class='timeline-horizontal'><div class='timeline-track'>{''.join(cells)}</div></div>"
 
 
 def use_example(questions: list[str], index: int) -> str:
@@ -264,11 +638,7 @@ def use_example(questions: list[str], index: int) -> str:
     return ""
 
 
-def ask_question(
-    user_query: str,
-    history: list[dict[str, str]] | None,
-    current_article_id: str,
-) -> tuple[list[dict[str, str]], str, str]:
+def ask_question(user_query, history, current_article_id):
     history = history or []
     if not user_query.strip():
         return history, "", EMPTY_SOURCES
@@ -316,46 +686,84 @@ def build_demo() -> gr.Blocks:
     selected_article_id = initial_article_id(articles)
     selected_article = get_article(selected_article_id)
     questions = example_questions(selected_article)
-    choices = [(article_label(article), article.article_id) for article in articles]
 
-    with gr.Blocks(title="Ask the News", css=UI_CSS) as demo:
-        gr.Markdown("# Ask the News", elem_classes=["app-shell"])
-        with gr.Row(equal_height=False, elem_classes=["app-shell"]):
-            with gr.Column(scale=5, elem_classes=["panel"]):
-                featured_card = gr.HTML(render_featured_card(selected_article))
-                article_selector = gr.Radio(
-                    choices=choices,
-                    value=selected_article_id,
-                    label="Stories",
-                    elem_classes=["headline-list"],
-                )
-            with gr.Column(scale=7, elem_classes=["panel"]):
-                chatbot_kwargs = {"label": "Ask the News"}
+    with gr.Blocks(title="Ask the News", css=UI_CSS, head=HEAD_HTML, theme=gr.themes.Base()) as demo:
+        gr.HTML(
+            "<header class='ath-header'>"
+            "<h1>Ask the News</h1>"
+            "<p>Read a featured story, then ask about it or surface a timeline of related coverage.</p>"
+            "</header>"
+        )
+
+        selected_article_textbox = gr.Textbox(
+            value=selected_article_id,
+            visible=False,
+            elem_id="selected-article-id",
+            interactive=True,
+        )
+
+        articles_state = gr.State(articles)
+
+        carousel_html = gr.HTML(value=render_carousel(articles, active_id=selected_article_id))
+
+        with gr.Row():
+            with gr.Column(scale=6):
+                article_view = gr.HTML(value=render_article_view(selected_article))
+
+            with gr.Column(scale=4, elem_classes=["chat-col"]):
+                chatbot_kwargs = {"label": "Conversation", "height": 360}
                 if "type" in inspect.signature(gr.Chatbot).parameters:
                     chatbot_kwargs["type"] = "messages"
                 chatbot = gr.Chatbot(**chatbot_kwargs)
-                user_input = gr.Textbox(
-                    label="Question",
-                    placeholder="Ask about the current story or a broader topic.",
-                )
-                with gr.Row(equal_height=True, elem_classes=["question-grid"]):
+
+                with gr.Row(elem_classes=["chips-row"]):
                     suggestion_one = gr.Button(questions[0], size="sm")
                     suggestion_two = gr.Button(questions[1], size="sm")
                     suggestion_three = gr.Button(questions[2], size="sm")
                     suggestion_four = gr.Button(questions[3], size="sm")
-                    send_button = gr.Button("Send", variant="primary")
-                with gr.Row():
-                    timeline_button = gr.Button("Timeline")
-                suggestion_state = gr.State(questions)
-                timeline_output = gr.HTML(EMPTY_TIMELINE)
-                sources_output = gr.Markdown(EMPTY_SOURCES)
-                
 
-        article_selector.change(
-            fn=load_article_view,
-            inputs=[article_selector],
+                user_input = gr.Textbox(
+                    placeholder="Ask about this story or a broader topic...",
+                    show_label=False,
+                )
+
+                with gr.Row():
+                    send_button = gr.Button("Send", variant="primary")
+                    timeline_button = gr.Button("Build timeline")
+
+                suggestion_state = gr.State(questions)
+
+        with gr.Group(elem_classes=["timeline-section"]):
+            gr.HTML(
+                "<div class='timeline-section-header'>"
+                "<h3>Timeline</h3>"
+                "<span class='timeline-section-hint'>Click a card to switch the current story.</span>"
+                "</div>"
+            )
+            timeline_output = gr.HTML(value=EMPTY_TIMELINE)
+
+        with gr.Accordion("Sources", open=False, elem_classes=["sources-section"]):
+            sources_output = gr.HTML(value=EMPTY_SOURCES)
+
+        def on_article_change(article_id: str, articles_list: list[Article]):
+            article = get_article(article_id)
+            new_questions = example_questions(article)
+            return (
+                render_carousel(articles_list, active_id=article_id),
+                render_article_view(article),
+                new_questions,
+                EMPTY_CHAT,
+                "",
+                EMPTY_SOURCES,
+                EMPTY_TIMELINE,
+            )
+
+        selected_article_textbox.change(
+            fn=on_article_change,
+            inputs=[selected_article_textbox, articles_state],
             outputs=[
-                featured_card,
+                carousel_html,
+                article_view,
                 suggestion_state,
                 chatbot,
                 user_input,
@@ -363,29 +771,29 @@ def build_demo() -> gr.Blocks:
                 timeline_output,
             ],
         ).then(
-            fn=lambda questions: suggestion_updates(questions),
+            fn=lambda q: suggestion_updates(q),
             inputs=[suggestion_state],
             outputs=[suggestion_one, suggestion_two, suggestion_three, suggestion_four],
         )
 
-        suggestion_one.click(fn=lambda questions: use_example(questions, 0), inputs=[suggestion_state], outputs=[user_input])
-        suggestion_two.click(fn=lambda questions: use_example(questions, 1), inputs=[suggestion_state], outputs=[user_input])
-        suggestion_three.click(fn=lambda questions: use_example(questions, 2), inputs=[suggestion_state], outputs=[user_input])
-        suggestion_four.click(fn=lambda questions: use_example(questions, 3), inputs=[suggestion_state], outputs=[user_input])
+        suggestion_one.click(fn=lambda q: use_example(q, 0), inputs=[suggestion_state], outputs=[user_input])
+        suggestion_two.click(fn=lambda q: use_example(q, 1), inputs=[suggestion_state], outputs=[user_input])
+        suggestion_three.click(fn=lambda q: use_example(q, 2), inputs=[suggestion_state], outputs=[user_input])
+        suggestion_four.click(fn=lambda q: use_example(q, 3), inputs=[suggestion_state], outputs=[user_input])
 
         send_button.click(
             fn=ask_question,
-            inputs=[user_input, chatbot, article_selector],
+            inputs=[user_input, chatbot, selected_article_textbox],
             outputs=[chatbot, user_input, sources_output],
         )
         user_input.submit(
             fn=ask_question,
-            inputs=[user_input, chatbot, article_selector],
+            inputs=[user_input, chatbot, selected_article_textbox],
             outputs=[chatbot, user_input, sources_output],
         )
         timeline_button.click(
             fn=build_timeline,
-            inputs=[article_selector, user_input],
+            inputs=[selected_article_textbox, user_input],
             outputs=[timeline_output],
         )
 

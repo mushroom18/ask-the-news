@@ -72,11 +72,69 @@ UI_CSS = """
   --panel-height: 640px;
 }
 
-.gradio-container {
+html, body, .gradio-container {
+  color-scheme: light !important;
   background: var(--bg) !important;
+}
+
+.gradio-container {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, "Helvetica Neue", Arial, system-ui, sans-serif !important;
   color: var(--text);
   max-width: 1320px !important;
+}
+
+/* Force light surfaces across all Gradio internals (overrides dark mode + base theme) */
+.gradio-container,
+.gradio-container *,
+.gradio-container *::before,
+.gradio-container *::after {
+  --background-fill-primary: var(--surface);
+  --background-fill-secondary: var(--surface);
+  --body-background-fill: var(--bg);
+  --block-background-fill: var(--surface);
+  --block-border-color: var(--border);
+  --border-color-primary: var(--border);
+  --color-accent-soft: var(--accent-soft);
+  --button-primary-background-fill: var(--accent);
+  --button-primary-background-fill-hover: #1d4ed8;
+  --button-primary-text-color: #ffffff;
+  --button-primary-border-color: var(--accent);
+  --button-secondary-background-fill: var(--surface);
+  --button-secondary-background-fill-hover: var(--accent-soft);
+  --button-secondary-text-color: var(--text);
+  --button-secondary-border-color: var(--border);
+  --input-background-fill: var(--surface);
+  --input-border-color: var(--border);
+  --neutral-50: #f9fafb;
+  --neutral-100: #f3f4f6;
+  --neutral-200: #e5e7eb;
+  --neutral-300: #d1d5db;
+  --neutral-400: #9ca3af;
+  --neutral-500: #6b7280;
+  --neutral-600: #4b5563;
+  --neutral-700: #374151;
+  --neutral-800: #1f2937;
+  --neutral-900: #111827;
+  --color-text-primary: var(--text);
+}
+
+/* Generic button polish: blue primary, rounded */
+.gradio-container button.primary,
+.gradio-container button[class*="primary"],
+.gradio-container .gr-button-primary,
+.gradio-container button.lg.primary {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+.gradio-container button.primary:hover,
+.gradio-container button[class*="primary"]:hover,
+.gradio-container .gr-button-primary:hover {
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
 }
 
 .ath-header {
@@ -298,8 +356,33 @@ UI_CSS = """
   flex: 1 1 auto !important;
   min-height: 0 !important;
   border: none !important;
-  background: transparent !important;
+  background: var(--surface) !important;
   box-shadow: none !important;
+  color: var(--text) !important;
+}
+
+/* Force every nested chatbot wrapper / message bubble onto a light surface */
+.chat-panel [class*="chatbot"] *,
+.chat-panel [class*="bubble"],
+.chat-panel [class*="message"] {
+  background-color: transparent !important;
+  color: var(--text) !important;
+}
+.chat-panel [class*="bubble"],
+.chat-panel [class*="message-bubble"] {
+  background: var(--bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+.chat-panel [class*="user"] [class*="bubble"],
+.chat-panel [class*="role-user"] [class*="bubble"] {
+  background: var(--accent-soft) !important;
+  border-color: #bfdbfe !important;
+}
+.chat-panel [class*="placeholder"],
+.chat-panel [class*="empty"] {
+  color: var(--muted) !important;
+  background: transparent !important;
 }
 
 .chat-panel .suggestions-row {
@@ -502,6 +585,25 @@ UI_CSS = """
 /* ------------- Sources (footer accordion) ------------- */
 .sources-section {
   margin-top: 24px;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--shadow-sm) !important;
+  overflow: hidden;
+}
+.sources-section > button,
+.sources-section [class*="label-wrap"],
+.sources-section [class*="accordion"] > button {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  font-weight: 600 !important;
+  padding: 14px 20px !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+.sources-section [data-testid="block-label"] {
+  background: var(--surface) !important;
+  color: var(--text) !important;
 }
 .sources-grid {
   display: grid;
@@ -865,9 +967,20 @@ def build_demo() -> gr.Blocks:
                 article_view = gr.HTML(value=render_article_view(selected_article))
 
             with gr.Column(scale=4, elem_classes=["chat-panel"]):
-                chatbot_kwargs = {"label": "", "show_label": False}
-                if "type" in inspect.signature(gr.Chatbot).parameters:
+                chatbot_kwargs = {
+                    "label": "",
+                    "show_label": False,
+                    "height": 440,
+                    "bubble_full_width": False,
+                    "container": False,
+                }
+                chatbot_params = inspect.signature(gr.Chatbot).parameters
+                if "type" in chatbot_params:
                     chatbot_kwargs["type"] = "messages"
+                if "bubble_full_width" not in chatbot_params:
+                    chatbot_kwargs.pop("bubble_full_width", None)
+                if "container" not in chatbot_params:
+                    chatbot_kwargs.pop("container", None)
                 chatbot = gr.Chatbot(**chatbot_kwargs)
 
                 suggestion_html = gr.HTML(value=render_suggestions(questions))

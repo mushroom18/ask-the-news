@@ -344,45 +344,47 @@ html, body, .gradio-container {
   border-radius: 16px !important;
   padding: 14px !important;
   box-shadow: var(--shadow-sm) !important;
-  height: var(--panel-height);
+  min-height: var(--panel-height);
   display: flex !important;
   flex-direction: column !important;
   gap: 10px !important;
-  overflow: hidden;
 }
 
+/* Direct children: strip Gradio's default panel chrome so everything
+   reads as a single white surface */
+.chat-panel > * {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  flex: 0 0 auto !important;
+}
+
+/* Chatbot: respect its Python height, light surface inside */
 .chat-panel .gradio-chatbot,
 .chat-panel [class*="chatbot"] {
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-  border: none !important;
+  flex: 0 0 auto !important;
   background: var(--surface) !important;
-  box-shadow: none !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
   color: var(--text) !important;
 }
 
-/* Force every nested chatbot wrapper / message bubble onto a light surface */
-.chat-panel [class*="chatbot"] *,
-.chat-panel [class*="bubble"],
-.chat-panel [class*="message"] {
-  background-color: transparent !important;
-  color: var(--text) !important;
-}
-.chat-panel [class*="bubble"],
-.chat-panel [class*="message-bubble"] {
+/* Message bubbles: neutral light, user bubble accent-soft */
+.chat-panel [data-testid="bot"] .message,
+.chat-panel [class*="bot-row"] [class*="bubble"] {
   background: var(--bg) !important;
   border: 1px solid var(--border) !important;
+  color: var(--text) !important;
   border-radius: 12px !important;
 }
-.chat-panel [class*="user"] [class*="bubble"],
-.chat-panel [class*="role-user"] [class*="bubble"] {
+.chat-panel [data-testid="user"] .message,
+.chat-panel [class*="user-row"] [class*="bubble"] {
   background: var(--accent-soft) !important;
-  border-color: #bfdbfe !important;
-}
-.chat-panel [class*="placeholder"],
-.chat-panel [class*="empty"] {
-  color: var(--muted) !important;
-  background: transparent !important;
+  border: 1px solid #bfdbfe !important;
+  color: var(--text) !important;
+  border-radius: 12px !important;
 }
 
 .chat-panel .suggestions-row {
@@ -419,14 +421,16 @@ html, body, .gradio-container {
 
 /* Unified input row (textbox + send button look like one bar) */
 .chat-panel .chat-input-row {
-  flex: 0 0 auto;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  padding: 4px 4px 4px 6px;
+  flex: 0 0 auto !important;
+  background: var(--bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 24px !important;
+  padding: 4px 4px 4px 6px !important;
+  margin: 0 !important;
   display: flex !important;
   align-items: center !important;
   gap: 4px !important;
+  min-height: 48px !important;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .chat-panel .chat-input-row:focus-within {
@@ -971,16 +975,9 @@ def build_demo() -> gr.Blocks:
                     "label": "",
                     "show_label": False,
                     "height": 440,
-                    "bubble_full_width": False,
-                    "container": False,
                 }
-                chatbot_params = inspect.signature(gr.Chatbot).parameters
-                if "type" in chatbot_params:
+                if "type" in inspect.signature(gr.Chatbot).parameters:
                     chatbot_kwargs["type"] = "messages"
-                if "bubble_full_width" not in chatbot_params:
-                    chatbot_kwargs.pop("bubble_full_width", None)
-                if "container" not in chatbot_params:
-                    chatbot_kwargs.pop("container", None)
                 chatbot = gr.Chatbot(**chatbot_kwargs)
 
                 suggestion_html = gr.HTML(value=render_suggestions(questions))

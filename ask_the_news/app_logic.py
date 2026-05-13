@@ -338,6 +338,16 @@ html, body, .gradio-container {
 }
 
 /* ------------- Chat panel (single unified component) ------------- */
+.chat-panel,
+.chat-panel > div,
+.chat-panel > .block,
+.chat-panel > [class*="form"] {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  width: 100% !important;
+}
+
 .chat-panel {
   background: var(--surface) !important;
   border: 1px solid var(--border) !important;
@@ -345,15 +355,14 @@ html, body, .gradio-container {
   padding: 14px !important;
   box-shadow: var(--shadow-sm) !important;
   height: var(--panel-height);
-  display: flex !important;
-  flex-direction: column !important;
   gap: 10px !important;
 }
 
-/* Direct children: just strip outer panel chrome so everything reads
-   as one surface. Do NOT strip padding/margin/flex — that breaks the
-   Gradio Textbox's internal hit area. */
+/* Direct children: full-width vertical stacking, no inherited chrome */
 .chat-panel > * {
+  width: 100% !important;
+  max-width: 100% !important;
+  flex-shrink: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
 }

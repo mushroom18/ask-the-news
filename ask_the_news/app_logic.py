@@ -337,6 +337,17 @@ html, body, .gradio-container {
   font-size: 14px;
 }
 
+/* ------------- Main two-column layout ------------- */
+/* Force columns to split by scale ratio, not by intrinsic content width.
+   Without this, article's wide content (hero image, long words) makes
+   the article column hog space and squeezes the chat column to ~225px
+   even on a 1500px viewport. */
+.gradio-container .row > [class*="column"],
+.gradio-container > div > .row > .column {
+  flex-basis: 0 !important;
+  min-width: 0 !important;
+}
+
 /* ------------- Chat panel (single unified component) ------------- */
 .chat-panel {
   background: var(--surface) !important;
@@ -345,6 +356,7 @@ html, body, .gradio-container {
   padding: 14px !important;
   box-shadow: var(--shadow-sm) !important;
   height: var(--panel-height);
+  min-width: 360px !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: stretch !important;
@@ -440,10 +452,19 @@ html, body, .gradio-container {
   padding: 4px 4px 4px 6px !important;
   margin: 0 !important;
   display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
   align-items: center !important;
   gap: 4px !important;
   min-height: 48px !important;
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+/* Defeat Gradio's min-width: min(160px, 100%) on the form wrapper so
+   it doesn't push the send button onto a new line when the panel is
+   narrow. */
+.chat-panel .chat-input-row > * {
+  min-width: 0 !important;
+  flex-shrink: 1 !important;
 }
 .chat-panel .chat-input-row:focus-within {
   border-color: var(--accent);

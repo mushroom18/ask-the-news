@@ -344,21 +344,18 @@ html, body, .gradio-container {
   border-radius: 16px !important;
   padding: 14px !important;
   box-shadow: var(--shadow-sm) !important;
-  min-height: var(--panel-height);
+  height: var(--panel-height);
   display: flex !important;
   flex-direction: column !important;
   gap: 10px !important;
 }
 
-/* Direct children: strip Gradio's default panel chrome so everything
-   reads as a single white surface */
+/* Direct children: just strip outer panel chrome so everything reads
+   as one surface. Do NOT strip padding/margin/flex — that breaks the
+   Gradio Textbox's internal hit area. */
 .chat-panel > * {
   background: transparent !important;
-  border: none !important;
   box-shadow: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  flex: 0 0 auto !important;
 }
 
 /* Chatbot: respect its Python height, light surface inside */
@@ -512,12 +509,25 @@ html, body, .gradio-container {
   margin-top: 4px;
 }
 .timeline-track {
+  position: relative;
   display: flex;
   align-items: stretch;
   overflow-x: auto;
   min-height: 380px;
   padding: 8px 16px;
   scrollbar-width: thin;
+}
+/* Single continuous horizontal line through the whole track */
+.timeline-track::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 50%;
+  margin-top: -7px;
+  height: 2px;
+  background: var(--border-strong);
+  z-index: 0;
 }
 .timeline-track::-webkit-scrollbar { height: 8px; }
 .timeline-track::-webkit-scrollbar-thumb {
@@ -531,17 +541,6 @@ html, body, .gradio-container {
   width: 240px;
   flex-shrink: 0;
   margin: 0 10px;
-}
-.timeline-item::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  margin-top: -7px;
-  height: 2px;
-  background: var(--border);
-  z-index: 0;
 }
 .timeline-cell {
   display: flex;
@@ -826,7 +825,7 @@ def render_suggestions(questions: list[str]) -> str:
     if not questions:
         return ""
     chips = []
-    for question in questions[:4]:
+    for question in questions[:2]:
         question_escaped_html = escape(question)
         question_escaped_js = question.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
         chips.append(
@@ -986,11 +985,8 @@ def build_demo() -> gr.Blocks:
                     user_input = gr.Textbox(
                         placeholder="Ask about this story or a broader topic...",
                         show_label=False,
-                        container=False,
                         elem_id="user-input-textbox",
                         scale=10,
-                        lines=1,
-                        max_lines=3,
                     )
                     send_button = gr.Button(
                         "↑",
@@ -1002,13 +998,7 @@ def build_demo() -> gr.Blocks:
 
         with gr.Group(elem_classes=["timeline-section"]):
             with gr.Row(elem_classes=["timeline-section-header-row"]):
-                gr.HTML(
-                    "<div class='timeline-section-header'>"
-                    "<h3>Timeline</h3>"
-                    "<span class='timeline-section-hint'>Click a card to switch the current story.</span>"
-                    "</div>",
-                    elem_classes=["timeline-header-html"],
-                )
+
                 timeline_button = gr.Button("Build timeline", variant="primary", scale=0, min_width=160)
             timeline_output = gr.HTML(value=EMPTY_TIMELINE)
 

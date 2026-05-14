@@ -88,9 +88,12 @@ export function AppShell({ articles }: AppShellProps) {
   return (
     <main className="mx-auto max-w-7xl px-6 pb-16 pt-6">
       <header className="mb-5 border-b border-gray-200 pb-4">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Ask the News</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          Ask the News
+        </h1>
         <p className="mt-1 text-sm text-gray-500">
-          Read a featured BBC story, then ask about it or surface a timeline of related coverage.
+          Read a featured BBC story, then ask about it or surface a timeline of
+          related coverage.
         </p>
       </header>
 

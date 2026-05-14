@@ -13,11 +13,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from openai import OpenAI
 
+from ask_the_news.backends.base import ArticleRepository, RetrievalBackend
 from ask_the_news.config import OPENAI_API_KEY, OPENAI_MAX_OUTPUT_TOKENS, OPENAI_REASONING_EFFORT, RETRIEVAL_TOP_K
 from ask_the_news.llm import answer_question, generate_timeline
+from ask_the_news.models import QueryBundle
 from ask_the_news.query_router import build_query_bundle, guardrail_query
-from ask_the_news.retrieval import LocalVectorRetriever
-from ask_the_news.storage import SQLiteStorage
+from ask_the_news.service import default_backends
 
 
 DEFAULT_JUDGE_MODEL = os.getenv("JUDGE_MODEL", "gpt-5-mini")
@@ -65,9 +66,15 @@ def citation_article_ids(context) -> list[str]:
     return article_ids
 
 
-def run_case(case: dict, retriever: LocalVectorRetriever, storage: SQLiteStorage, top_k: int) -> dict:
+def run_case(
+    case: dict,
+    retriever: RetrievalBackend,
+    repository: ArticleRepository,
+    top_k: int,
+    disable_router: bool = False,
+) -> dict:
     current_article_id = case.get("current_article_id", "").strip()
-    current_article = storage.get_article(current_article_id) if current_article_id else None
+    current_article = repository.get_article(current_article_id) if current_article_id else None
     question = case["question"]
     guardrail = guardrail_query(question, current_article=current_article)
 
@@ -98,7 +105,18 @@ def run_case(case: dict, retriever: LocalVectorRetriever, storage: SQLiteStorage
         )
         return result
 
-    bundle = build_query_bundle(question, current_article=current_article)
+    if disable_router:
+        bundle = QueryBundle(
+            user_query=question,
+            mode="global",
+            current_article_id=current_article.article_id if current_article else "",
+            current_article_title=current_article.title if current_article else "",
+            current_article_description=current_article.description if current_article else "",
+            current_article_section=current_article.section if current_article else "",
+            route_reason="router disabled (ablation)",
+        )
+    else:
+        bundle = build_query_bundle(question, current_article=current_article)
     result["query_mode"] = bundle.mode
     result["route_reason"] = bundle.route_reason
 
@@ -263,22 +281,34 @@ def main() -> None:
     parser.add_argument("--output", default="evaluation/results.jsonl")
     parser.add_argument("--top-k", type=int, default=RETRIEVAL_TOP_K)
     parser.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
+    parser.add_argument(
+        "--disable-router",
+        action="store_true",
+        help="Bypass the query router; force every query to global mode.",
+    )
     args = parser.parse_args()
 
     cases_path = Path(args.cases)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    storage = SQLiteStorage()
-    retriever = LocalVectorRetriever(storage=storage)
+    repository, retriever = default_backends()
 
     cases = load_cases(cases_path)
     results: list[dict] = []
     with output_path.open("w", encoding="utf-8") as handle:
-        for case in cases:
-            result = run_case(case, retriever=retriever, storage=storage, top_k=args.top_k)
+        for index, case in enumerate(cases, start=1):
+            print(f"[{index}/{len(cases)}] {case['id']}: running...", flush=True)
+            result = run_case(
+                case,
+                retriever=retriever,
+                repository=repository,
+                top_k=args.top_k,
+                disable_router=args.disable_router,
+            )
             result["judge"] = judge_case(result, judge_model=args.judge_model)
             handle.write(json.dumps(result, ensure_ascii=False) + "\n")
+            handle.flush()
             results.append(result)
 
     print(json.dumps(summarize_scores(results), indent=2))

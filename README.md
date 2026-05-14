@@ -90,6 +90,12 @@ hard retrieval metrics and `gpt-5-mini` LLM-as-judge (0–2 scale per dimension)
   is **identical** across all four. Chunking is not a leverage point on this
   corpus; the next iteration should invest in hybrid retrieval and reranking
   instead.
+- **Article-aggregation rerank** on the QA path — pulls a 3× candidate pool
+  from pgvector, then reranks by article-level aggregate score
+  (`top_chunk + 0.15 × second_chunk`). precision@5 lifts
+  **0.347 → 0.465 (+34% relative)** and `answer_groundedness` ticks up to
+  1.97 / 2.00. Gated by `ARTICLE_AGGREGATION=on` env var; opt-in until a
+  cross-encoder reranker is added.
 
 Full report (methodology, per-dimension tables, reproduce script):
 [`evaluation/README.md`](evaluation/README.md).

@@ -9,6 +9,9 @@ from pathlib import Path
 import numpy as np
 
 from ask_the_news.config import (
+    ARTICLE_AGGREGATION,
+    ARTICLE_AGGREGATION_BONUS,
+    ARTICLE_AGGREGATION_POOL_MULT,
     RETRIEVAL_TOP_K,
     TIMELINE_BUCKET_GRANULARITY,
     TIMELINE_MAX_ARTICLES,
@@ -21,6 +24,48 @@ from ask_the_news.embeddings import EmbeddingModel
 from ask_the_news.models import Article, Citation, QAContext, QueryBundle, RetrievedChunk, TimelineContext, TimelineItem
 from ask_the_news.query_router import build_query_bundle, guardrail_query
 from ask_the_news.storage import SQLiteStorage
+
+
+def article_aware_chunk_rerank(
+    chunks: list[RetrievedChunk],
+    top_k: int,
+    second_chunk_bonus: float = ARTICLE_AGGREGATION_BONUS,
+) -> list[RetrievedChunk]:
+    """Rerank a candidate chunk pool using article-level aggregate scores.
+
+    For each article, the aggregate score is `top_chunk_score + bonus *
+    second_chunk_score`. Articles with multiple high-scoring chunks rank
+    above articles with one strong chunk that may be a coincidence.
+    Within an article, chunks keep their raw cosine score order.
+
+    Returns at most `top_k` chunks, with ranks renumbered 1..top_k.
+    """
+    if not chunks:
+        return []
+
+    by_article: dict[str, list[RetrievedChunk]] = defaultdict(list)
+    for item in chunks:
+        by_article[item.chunk.article_id].append(item)
+    for items in by_article.values():
+        items.sort(key=lambda x: x.score, reverse=True)
+
+    def aggregate(items: list[RetrievedChunk]) -> float:
+        top = [x.score for x in items[:2]]
+        if not top:
+            return 0.0
+        return top[0] + (second_chunk_bonus * top[1] if len(top) > 1 else 0.0)
+
+    sorted_articles = sorted(by_article.items(), key=lambda kv: -aggregate(kv[1]))
+
+    out: list[RetrievedChunk] = []
+    new_rank = 1
+    for _, items in sorted_articles:
+        for item in items:
+            out.append(RetrievedChunk(chunk=item.chunk, score=item.score, rank=new_rank))
+            new_rank += 1
+            if len(out) >= top_k:
+                return out
+    return out
 
 
 class LocalVectorRetriever:
@@ -59,7 +104,8 @@ class LocalVectorRetriever:
 
         query_vector = np.asarray(self.embedder.encode_query(query.retrieval_text()), dtype=np.float32)
         scores = matrix @ query_vector
-        top_indices = np.argsort(scores)[::-1][:top_k]
+        pool_size = min(top_k, scores.shape[0])
+        top_indices = np.argsort(scores)[::-1][:pool_size]
         chunks_by_id = {chunk.chunk_id: chunk for chunk in self.storage.list_chunks_by_ids([chunk_ids[index] for index in top_indices])}
 
         results: list[RetrievedChunk] = []
@@ -72,7 +118,11 @@ class LocalVectorRetriever:
         return results
 
     def build_qa_context(self, query: QueryBundle, top_k: int = RETRIEVAL_TOP_K) -> QAContext:
-        retrieved_chunks = self.search(query, top_k=top_k)
+        if ARTICLE_AGGREGATION:
+            pool = self.search(query, top_k=top_k * ARTICLE_AGGREGATION_POOL_MULT)
+            retrieved_chunks = article_aware_chunk_rerank(pool, top_k=top_k)
+        else:
+            retrieved_chunks = self.search(query, top_k=top_k)
         citations = citations_from_chunks(retrieved_chunks, self.storage)
         return QAContext(query=query, retrieved_chunks=retrieved_chunks, citations=citations)
 

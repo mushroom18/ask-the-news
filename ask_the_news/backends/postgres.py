@@ -10,6 +10,8 @@ from pgvector.psycopg import register_vector
 
 from ask_the_news.backends.base import ArticleRepository, RetrievalBackend
 from ask_the_news.config import (
+    ARTICLE_AGGREGATION,
+    ARTICLE_AGGREGATION_POOL_MULT,
     RETRIEVAL_TOP_K,
     TIMELINE_BUCKET_GRANULARITY,
     TIMELINE_MAX_ARTICLES,
@@ -28,6 +30,7 @@ from ask_the_news.models import (
     TimelineContext,
     TimelineItem,
 )
+from ask_the_news.retrieval import article_aware_chunk_rerank
 
 
 def _article_from_row(row: dict) -> Article:
@@ -258,7 +261,11 @@ class PostgresRetrievalBackend(RetrievalBackend):
         return results
 
     def build_qa_context(self, query: QueryBundle, top_k: int = RETRIEVAL_TOP_K) -> QAContext:
-        retrieved_chunks = self._search(query, top_k=top_k)
+        if ARTICLE_AGGREGATION:
+            pool = self._search(query, top_k=top_k * ARTICLE_AGGREGATION_POOL_MULT)
+            retrieved_chunks = article_aware_chunk_rerank(pool, top_k=top_k)
+        else:
+            retrieved_chunks = self._search(query, top_k=top_k)
         citations = self._citations(retrieved_chunks)
         return QAContext(query=query, retrieved_chunks=retrieved_chunks, citations=citations)
 

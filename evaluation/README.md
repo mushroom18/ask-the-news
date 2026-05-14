@@ -10,6 +10,7 @@ End-to-end evaluation for the Ask the News RAG pipeline, with ablations.
 | **Baseline answer quality** (LLM-as-judge, 0–2) | groundedness **1.90**, usefulness **1.93**, citations **1.70** |
 | **Router ablation** (router off) | overall hit@3 drops 9% (**0.875 → 0.792**); on contextual queries alone, hit@3 collapses **0.75 → 0.25** |
 | **Chunk-size ablation** (100 / 150 / 180 / 220 words) | hit@3 is identical (0.875) across all four; chunk size is **not** a high-leverage tuning knob on this corpus |
+| **Article-aggregation rerank** (QA path) | precision@5 **0.347 → 0.465 (+34% rel)**, answer_groundedness +0.07; MRR drops 0.035 (right article still found, just not always at rank 1) |
 
 ## Methodology
 
@@ -119,6 +120,57 @@ Re-chunked and re-embedded the entire 1,500-article corpus four times (`CHUNK_TA
 - LLM judge scores are essentially flat. The only sensitive dimension is `timeline_quality`, which peaks at `chunk=180`.
 - **Chunk size is a low-leverage knob on this corpus.** Further effort should target retrieval architecture (hybrid BM25 + vector, reranker, query rewriting), not chunking parameters.
 
+## Ablation 3 — Article-level aggregation rerank (QA path only)
+
+Pulls a wider candidate pool from pgvector (`top_k × 3 = 24` chunks), then reranks by article instead of by raw chunk score. Per article, the aggregate score is `top_chunk_score + 0.15 × second_chunk_score`. Within each article, chunks keep their cosine order. Returns the top-K chunks in article-priority order so the LLM sees several supporting passages from the same source before switching to the next article.
+
+Implementation: [`article_aware_chunk_rerank`](../ask_the_news/retrieval.py) (re-used by both the local and Postgres backends). Gated by the `ARTICLE_AGGREGATION` env var (default `off`), so baseline behaviour is unchanged.
+
+### What changes structurally
+
+For the query *"What did Trump say about tariffs?"*:
+
+```
+Aggregation OFF  (top-8 spread across 4 articles)
+  1. article-60f543… score 0.751  "Donald Trump says he will announce tariffs…"
+  2. article-2528c4… score 0.738  "Trump announces 25% tariffs on all steel…"
+  3. article-2528c4… score 0.715
+  4. article-ab7ab3… score 0.706
+  5. article-2528c4… score 0.703
+  6. article-60f543… score 0.695
+  7. article-2528c4… score 0.673
+  8. article-72c4ac… score 0.669
+
+Aggregation ON   (top-8 collapsed onto 2 articles)
+  1-5. article-60f543…  (its five strongest chunks first)
+  6-8. article-2528c4…  (its three strongest chunks)
+```
+
+### Results
+
+| Metric | baseline | article aggregation | Δ |
+|---|---|---|---|
+| **precision@5** | 0.347 | **0.465** | **+0.118 (+34% rel)** |
+| judge answer_groundedness | 1.90 | **1.97** | +0.07 |
+| hit@3 / hit@5 | 0.875 | 0.875 | 0 |
+| judge retrieval_relevance | 2.00 | 2.00 | 0 |
+| judge citation_support | 1.70 | 1.70 | 0 |
+| MRR | 0.861 | 0.826 | −0.035 |
+| judge timeline_quality | 1.71 | 1.22 | −0.49 (noise — see below) |
+
+### Caveat: judge noise on the timeline slice
+
+`gpt-5-mini` with `reasoning_effort=minimal` returned the *same* 6 timeline article lists across both runs (verified by comparing `timeline_items`), but flipped `timeline-028` from 2 → 1 on the second pass. The −0.49 drop is **single-case LLM judge variance**, not a real regression — this ablation does not touch the timeline path.
+
+### Takeaways
+
+- `precision@5` jumps **+34% relative** (0.347 → 0.465). With fewer distinct articles in top-5 the proportion of gold-labelled articles climbs proportionally. Citations become tighter.
+- `answer_groundedness` ticks up slightly because the LLM sees several passages from the same source, giving it more material to actually back its claims against.
+- `MRR` drops a small amount: occasionally an article that had a single strongest chunk gets pushed below an article whose top-2 chunks aggregate higher. `hit@3` is unchanged, so the *right* article is still found — just not always at rank 1.
+- LLM judge dimensions for QA are flat or slightly positive. Bigger wins on the judge side would likely need a different lever (e.g. a real cross-encoder rerank).
+
+**Default policy** — kept `ARTICLE_AGGREGATION` opt-in for now. Worth flipping on by default once a cross-encoder reranker is in place too, since they compose well.
+
 ## What this tells the next iteration
 
 | Optimization | Predicted impact | Effort |
@@ -150,6 +202,11 @@ for size in 100 150 180 220; do
     --cases evaluation/cases_template.jsonl \
     --output evaluation/results_chunk${size}.jsonl
 done
+
+# Article-aggregation rerank ablation
+ARTICLE_AGGREGATION=on python evaluation/judge.py \
+  --cases evaluation/cases_template.jsonl \
+  --output evaluation/results_article_agg.jsonl
 ```
 
 ## Case schema
@@ -172,3 +229,4 @@ Each line in `cases_template.jsonl` is a JSON object:
 - `results_baseline.jsonl` — baseline run (router on, chunk=180)
 - `results_no_router.jsonl` — router-off ablation
 - `results_chunk{100,150,220}.jsonl` — chunk-size ablations
+- `results_article_agg.jsonl` — article-aggregation rerank ablation

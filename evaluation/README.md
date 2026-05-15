@@ -11,6 +11,7 @@ End-to-end evaluation for the Ask the News RAG pipeline, with ablations.
 | **Router ablation** (router off) | overall hit@3 drops 9% (**0.875 → 0.792**); on contextual queries alone, hit@3 collapses **0.75 → 0.25** |
 | **Chunk-size ablation** (100 / 150 / 180 / 220 words) | hit@3 is identical (0.875) across all four; chunk size is **not** a high-leverage tuning knob on this corpus |
 | **Article-aggregation rerank** (QA path) | precision@5 **0.347 → 0.465 (+34% rel)**, answer_groundedness +0.07; MRR drops 0.035 (right article still found, just not always at rank 1) |
+| **Hybrid retrieval ablation** (BM25 + pgvector + RRF) | **Regressed on this corpus** (hit@3 0.875 → 0.792). Baseline already near ceiling and queries lack lexical-precise terms — BM25 surfaces topical noise that RRF dilutes vector top-1. Honest negative result; reroute to cross-encoder rerank. |
 
 ## Methodology
 
@@ -171,14 +172,53 @@ Aggregation ON   (top-8 collapsed onto 2 articles)
 
 **Default policy** — kept `ARTICLE_AGGREGATION` opt-in for now. Worth flipping on by default once a cross-encoder reranker is in place too, since they compose well.
 
+## Ablation 4 — Hybrid retrieval (BM25 + pgvector + RRF)
+
+A second retrieval lane: Postgres `tsvector` + GIN index runs BM25 alongside the existing pgvector `<=>` cosine search. Both lanes return their own top-30 candidate pool. The two pools are fused with Reciprocal Rank Fusion (`SUM(1.0 / (60 + rank))`) and the top-K of the fused score is returned.
+
+The BM25 query is built as an OR-of-tokens (stopwords stripped, len > 2) and parsed with `websearch_to_tsquery`. The default `plainto_tsquery` ANDs every token, which on a natural-language sentence ("what tariffs did Trump announce on 1 February 2025?") leaves zero matches once stopwords are removed — so BM25 contributes nothing and the fusion degenerates to pure vector. OR-of-tokens fixes that.
+
+Schema change: a generated `ts tsvector` column on `chunks` plus a GIN index ([`sql/schema.sql`](../sql/schema.sql)). Code: [`PostgresRetrievalBackend._hybrid_search`](../ask_the_news/backends/postgres.py).
+
+### Results
+
+| Metric | baseline | hybrid | Δ |
+|---|---|---|---|
+| hit@3 | 0.875 | **0.792** | **−9.5%** |
+| hit@5 | 0.875 | 0.833 | −4.8% |
+| MRR | 0.861 | **0.773** | **−10.2%** |
+| precision@5 | 0.347 | 0.264 | −24% |
+| answer_groundedness (judge) | 1.90 | 1.90 | 0 |
+| citation_support (judge) | 1.70 | 1.70 | 0 |
+| answer_usefulness (judge) | 1.93 | 1.93 | 0 |
+
+Per-case hit@3 diff: **0 cases improved, 2 regressed (qa-012, qa-016), 22 unchanged.**
+
+### Why hybrid regressed on this dataset
+
+- **Baseline is already near ceiling.** hit@3 = 0.875 means only 3 of 24 QA cases miss; those 3 are typically queries where the gold chunk's *text* shares almost no words with the question (e.g. qa-004 asks about "what did Elon Musk do on X at the start of 2025?", and the gold article uses "Kekius Maximus" + "Pepe the Frog" — words BM25 can't match either).
+- **The query set is topical, not lexical-precise.** Most cases ask about Trump / Ukraine / Gaza / OpenAI — broad topics where many articles are lexically relevant. BM25 surfaces a long tail of topical-but-wrong chunks; RRF then dilutes the high-confidence vector top-1 down to top-3.
+- **The LLM judge missed the regression.** Groundedness, citations and usefulness scores didn't move — even when the gold article isn't in retrieval top-3, the top-K still contains *some* relevant chunks and the LLM stitches together a usable answer. This is exactly why the eval combines hard retrieval metrics with LLM judging: each catches what the other misses.
+
+### When hybrid would help (and we'd rerun this)
+
+- Corpora dominated by proper nouns, IDs, code symbols (product catalogs, API docs)
+- Multilingual queries with code-switching (BM25's lexical matching beats embeddings for OOV terms)
+- Lower-baseline retrieval where vector recall is already a bottleneck
+
+### Takeaway
+
+Hybrid retrieval is **not** a free lift. Implemented and shipped behind the `HYBRID_RETRIEVAL` env var (default off) in case query distribution changes. Next-phase optimization moves to cross-encoder reranking, which directly attacks the kind of ranking error vector search makes here (correct article retrieved but pushed down a slot).
+
 ## What this tells the next iteration
 
-| Optimization | Predicted impact | Effort |
+| Optimization | Status | Notes |
 |---|---|---|
-| **Hybrid retrieval** (BM25 + pgvector with RRF or weighted fusion) | High — covers the lexical-precise queries that pure vector search misses | Medium |
-| **Cross-encoder reranker** on top-30 → top-8 | Medium-High — should lift `precision@5` and `citation_support` | Low |
-| **Query rewriting** (turn casual question into search-friendly form) | Low-Medium on this corpus, because the router already injects article context for contextual queries | Low |
-| Chunk-size tuning | **None** on this corpus | Medium |
+| **Article-aggregation rerank** | ✅ shipped (Ablation 3) | precision@5 +34% on this corpus |
+| **Hybrid retrieval** (BM25 + pgvector + RRF) | ❌ tested, regressed (Ablation 4) | Baseline near ceiling + queries lack lexical-precise terms; kept behind `HYBRID_RETRIEVAL=on` env var for future query distributions |
+| **Cross-encoder reranker** on top-30 → top-8 | 🔜 next | Most promising: directly attacks the kind of error where vector retrieves the right article but ranks it 2nd or 3rd |
+| **Query rewriting** | low priority | Router already injects article context for contextual queries |
+| Chunk-size tuning | ❌ tested, no signal (Ablation 2) | Skip |
 | Larger / domain-tuned embedding model | Low — `all-MiniLM-L6-v2` already hits 87.5% hit@3 | Medium |
 
 ## Reproduce
@@ -207,6 +247,12 @@ done
 ARTICLE_AGGREGATION=on python evaluation/judge.py \
   --cases evaluation/cases_template.jsonl \
   --output evaluation/results_article_agg.jsonl
+
+# Hybrid retrieval ablation (requires the schema migration that adds ts column)
+python -m ask_the_news.admin init-db   # idempotent: adds ts + GIN index
+HYBRID_RETRIEVAL=on python evaluation/judge.py \
+  --cases evaluation/cases_template.jsonl \
+  --output evaluation/results_hybrid.jsonl
 ```
 
 ## Case schema
@@ -230,3 +276,4 @@ Each line in `cases_template.jsonl` is a JSON object:
 - `results_no_router.jsonl` — router-off ablation
 - `results_chunk{100,150,220}.jsonl` — chunk-size ablations
 - `results_article_agg.jsonl` — article-aggregation rerank ablation
+- `results_hybrid.jsonl` — BM25 + vector + RRF hybrid retrieval ablation

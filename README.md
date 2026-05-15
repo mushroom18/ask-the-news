@@ -96,6 +96,13 @@ hard retrieval metrics and `gpt-5-mini` LLM-as-judge (0–2 scale per dimension)
   **0.347 → 0.465 (+34% relative)** and `answer_groundedness` ticks up to
   1.97 / 2.00. Gated by `ARTICLE_AGGREGATION=on` env var; opt-in until a
   cross-encoder reranker is added.
+- **Hybrid retrieval** (BM25 via Postgres `tsvector` + pgvector + RRF
+  fusion) — implemented and benchmarked, **regressed on this corpus**
+  (hit@3 0.875 → 0.792). Baseline already near ceiling and the query set
+  lacks lexical-precise terms, so BM25 surfaced topical noise that diluted
+  vector top-1 results via RRF. Honest negative finding: hybrid is not a
+  free lift — it's corpus-dependent. Code shipped behind
+  `HYBRID_RETRIEVAL=on` for future query distributions.
 
 Full report (methodology, per-dimension tables, reproduce script):
 [`evaluation/README.md`](evaluation/README.md).
@@ -303,10 +310,12 @@ CORS_ALLOW_ORIGINS=http://localhost:3000,https://your-frontend.vercel.app
 
 ## Roadmap
 
-- [ ] **Hybrid retrieval** — combine BM25 (`tsvector` GIN index) with pgvector
-  using Reciprocal Rank Fusion; expected to lift lexical-precise queries
-- [ ] **Cross-encoder reranker** on top-30 → top-8 to lift `citation_support`
-  and `precision@5`
+- [x] **Article-aggregation rerank** — shipped behind `ARTICLE_AGGREGATION` env var
+  (precision@5 +34% relative on the eval set)
+- [x] **Hybrid retrieval** — shipped behind `HYBRID_RETRIEVAL` env var; ablation
+  showed regression on this corpus, kept as opt-in for future query distributions
+- [ ] **Cross-encoder reranker** on top-30 → top-8 to lift the cases where
+  vector retrieves the right article but ranks it 2nd or 3rd
 - [ ] **Auto-ingestion** — GitHub Actions cron pulls new monthly subsets and
   upserts to Postgres
 - [ ] **Tests + CI** — unit tests for chunking edge cases, retrieval ranking,

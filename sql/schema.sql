@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_article_id  ON chunks(article_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_index ON chunks(chunk_index);
 
+-- Full-text search column for hybrid (BM25 + vector) retrieval.
+-- ts is a STORED generated column so writes pay the cost once; the GIN
+-- index makes `chunks WHERE ts @@ plainto_tsquery(...)` fast.
+ALTER TABLE chunks
+  ADD COLUMN IF NOT EXISTS ts tsvector
+  GENERATED ALWAYS AS (to_tsvector('english', text)) STORED;
+CREATE INDEX IF NOT EXISTS idx_chunks_ts ON chunks USING GIN (ts);
+
 -- ANN index deferred until the corpus stabilises; exact search is fine for the
 -- current scale (tens of thousands of chunks). Enable when needed:
 --   CREATE INDEX idx_chunks_embedding_hnsw

@@ -12,6 +12,10 @@ from ask_the_news.backends.base import ArticleRepository, RetrievalBackend
 from ask_the_news.config import (
     ARTICLE_AGGREGATION,
     ARTICLE_AGGREGATION_POOL_MULT,
+    HYBRID_BM25_POOL,
+    HYBRID_RETRIEVAL,
+    HYBRID_RRF_K,
+    HYBRID_VECTOR_POOL,
     RETRIEVAL_TOP_K,
     TIMELINE_BUCKET_GRANULARITY,
     TIMELINE_MAX_ARTICLES,
@@ -61,6 +65,28 @@ def _chunk_from_row(row: dict) -> Chunk:
         text=row["text"],
         embedding_text=row["embedding_text"],
     )
+
+
+_BM25_STOPWORDS = {
+    "the", "and", "but", "with", "that", "this", "what", "when", "where",
+    "who", "why", "how", "for", "from", "was", "were", "are", "did", "does",
+    "has", "have", "had", "you", "your", "they", "them", "their", "she",
+    "him", "his", "her", "its", "our", "any", "all", "some", "than",
+}
+
+
+def _build_bm25_or_query(query_text: str) -> str:
+    """Turn a natural-language question into an OR-of-tokens query string
+    suitable for `websearch_to_tsquery`. Drops stopwords and tokens shorter
+    than 3 chars; returns "" if nothing useful is left, in which case the
+    BM25 leg of the fusion contributes no candidates."""
+    import re
+
+    words = re.findall(r"[A-Za-z][A-Za-z']*", query_text.lower())
+    keep = [w for w in words if len(w) > 2 and w not in _BM25_STOPWORDS]
+    if not keep:
+        return ""
+    return " OR ".join(keep)
 
 
 def _content_hash(article: Article) -> str:
@@ -234,6 +260,11 @@ class PostgresRetrievalBackend(RetrievalBackend):
         self.embedder = embedder or EmbeddingModel()
 
     def _search(self, query: QueryBundle, top_k: int) -> list[RetrievedChunk]:
+        if HYBRID_RETRIEVAL:
+            return self._hybrid_search(query, top_k)
+        return self._vector_search(query, top_k)
+
+    def _vector_search(self, query: QueryBundle, top_k: int) -> list[RetrievedChunk]:
         query_vector = np.asarray(self.embedder.encode_query(query.retrieval_text()), dtype=np.float32)
         with connect() as conn, conn.cursor(row_factory=psycopg_dict_row()) as cur:
             cur.execute(
@@ -246,6 +277,82 @@ class PostgresRetrievalBackend(RetrievalBackend):
                  LIMIT %s
                 """,
                 (query_vector, query_vector, top_k),
+            )
+            rows = cur.fetchall()
+
+        results: list[RetrievedChunk] = []
+        for rank, row in enumerate(rows, start=1):
+            results.append(
+                RetrievedChunk(
+                    chunk=_chunk_from_row(row),
+                    score=float(row["score"]),
+                    rank=rank,
+                )
+            )
+        return results
+
+    def _hybrid_search(self, query: QueryBundle, top_k: int) -> list[RetrievedChunk]:
+        """Hybrid retrieval: BM25 (Postgres tsvector) + pgvector cosine, fused via RRF.
+
+        Reciprocal Rank Fusion: each candidate's final score is the sum of
+        `1 / (k + rank)` across both lists. Candidates that rank well in
+        either list survive; those that rank well in both rank highest.
+        BM25 catches lexical-precise queries (proper nouns, dates) that
+        pure vector search can miss; vector covers semantic paraphrases
+        that bag-of-words misses.
+
+        Note on the BM25 query: we build an OR-of-terms expression and parse
+        it with `websearch_to_tsquery`. `plainto_tsquery` defaults to ANDing
+        every token, which on natural-language questions ("what did X do on
+        Y at start of 2025?") leaves zero matches once stopwords are stripped.
+        """
+        query_text = query.retrieval_text()
+        query_vector = np.asarray(self.embedder.encode_query(query_text), dtype=np.float32)
+        bm25_text = _build_bm25_or_query(query_text)
+        sql = """
+            WITH
+              bm25 AS (
+                SELECT chunk_id,
+                       ROW_NUMBER() OVER (ORDER BY ts_rank_cd(ts, q) DESC) AS r
+                  FROM chunks, websearch_to_tsquery('english', %s) AS q
+                 WHERE %s <> '' AND ts @@ q
+                 ORDER BY ts_rank_cd(ts, q) DESC
+                 LIMIT %s
+              ),
+              vec AS (
+                SELECT chunk_id, ROW_NUMBER() OVER () AS r FROM (
+                  SELECT chunk_id FROM chunks
+                   ORDER BY embedding <=> %s
+                   LIMIT %s
+                ) sub
+              ),
+              fused AS (
+                SELECT chunk_id, SUM(1.0 / (%s::float + r)) AS rrf_score
+                  FROM (SELECT chunk_id, r FROM bm25
+                        UNION ALL
+                        SELECT chunk_id, r FROM vec) u
+                 GROUP BY chunk_id
+              )
+            SELECT c.chunk_id, c.article_id, c.chunk_index, c.title, c.published_at,
+                   c.description, c.section, c.url, c.text, c.embedding_text,
+                   f.rrf_score AS score
+              FROM fused f
+              JOIN chunks c ON c.chunk_id = f.chunk_id
+             ORDER BY f.rrf_score DESC
+             LIMIT %s
+        """
+        with connect() as conn, conn.cursor(row_factory=psycopg_dict_row()) as cur:
+            cur.execute(
+                sql,
+                (
+                    bm25_text,
+                    bm25_text,
+                    HYBRID_BM25_POOL,
+                    query_vector,
+                    HYBRID_VECTOR_POOL,
+                    HYBRID_RRF_K,
+                    top_k,
+                ),
             )
             rows = cur.fetchall()
 

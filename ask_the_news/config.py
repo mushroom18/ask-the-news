@@ -32,6 +32,11 @@ RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "8"))
 ARTICLE_AGGREGATION = os.getenv("ARTICLE_AGGREGATION", "off").strip().lower() == "on"
 ARTICLE_AGGREGATION_POOL_MULT = int(os.getenv("ARTICLE_AGGREGATION_POOL_MULT", "3"))
 ARTICLE_AGGREGATION_BONUS = float(os.getenv("ARTICLE_AGGREGATION_BONUS", "0.15"))
+
+HYBRID_RETRIEVAL = os.getenv("HYBRID_RETRIEVAL", "off").strip().lower() == "on"
+HYBRID_BM25_POOL = int(os.getenv("HYBRID_BM25_POOL", "30"))
+HYBRID_VECTOR_POOL = int(os.getenv("HYBRID_VECTOR_POOL", "30"))
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
 TIMELINE_RECALL_K = int(os.getenv("TIMELINE_RECALL_K", "30"))
 TIMELINE_MAX_ARTICLES = int(os.getenv("TIMELINE_MAX_ARTICLES", "12"))
 TIMELINE_MAX_PER_BUCKET = int(os.getenv("TIMELINE_MAX_PER_BUCKET", "2"))

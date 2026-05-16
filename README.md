@@ -1,25 +1,20 @@
----
-title: Ask the News API
-emoji: 📰
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
----
-
 # Ask the News
 
 A production-shaped Retrieval-Augmented Generation (RAG) project over BBC News.
 Read a featured story, ask grounded questions about it, and surface a horizontal
 timeline of related coverage.
 
-- Live frontend — https://ask-the-news-eta.vercel.app
+- Live frontend — https://ask-the-news-topaz.vercel.app
 - Backend API — https://mushroom18-ask-the-news.hf.space (FastAPI on HF Space Docker)
 - Evaluation report — [`evaluation/README.md`](evaluation/README.md)
 
 **Stack**: Next.js 16 · React 19 · Tailwind v4 · FastAPI · Postgres + pgvector
 (Neon) · sentence-transformers · OpenAI Responses API · Docker on HF Space.
 End-to-end deploys on free tiers — $0/mo to keep the live demo running.
+
+**Key numbers**: 1,500 BBC articles · 6,004 chunks · hit@3 = **0.875** ·
+MRR = **0.861** · 5 controlled ablation studies — see
+[`evaluation/README.md`](evaluation/README.md).
 
 ## Why this project is interesting
 
@@ -28,17 +23,20 @@ End-to-end deploys on free tiers — $0/mo to keep the live demo running.
   Postgres tables. A single SQL query joins them and runs cosine similarity
   via pgvector in one round trip.
 - **Context router as a deliberate architectural piece.** A cheap `gpt-5-nano`
-  classifier routes every question to *contextual* (rewrite the retrieval
-  text with the current article's metadata) or *global* (use the bare
+  classifier routes every question to _contextual_ (rewrite the retrieval
+  text with the current article's metadata) or _global_ (use the bare
   question). Ablation: removing the router collapses hit@3 from **75% → 25%**
   on contextual queries.
 - **Horizontal timeline with bucket-aware reranking.** Top-K chunks aggregate
   to articles, ISO-week buckets cap how many adjacent stories one news cycle
   can contribute, then `gpt-5-mini` rewrites each summary with strict JSON
   schema output.
-- **Benchmarked.** 30 hand-curated cases × hard retrieval metrics
-  (hit@k, MRR) × 5 dimensions of `gpt-5-mini` LLM-as-judge. Baseline numbers
-  and two ablations live in [`evaluation/README.md`](evaluation/README.md).
+- **Benchmarked with five controlled ablations.** 30 hand-curated cases ×
+  hard retrieval metrics (hit@k, MRR, precision@5) × 5 dimensions of
+  `gpt-5-mini` LLM-as-judge. Includes honest negative results
+  (hybrid retrieval regressed; chunk-size sweep was no-signal). Full
+  methodology and per-ablation tables in
+  [`evaluation/README.md`](evaluation/README.md).
 - **Graceful fallbacks all the way down.** Router, QA, and timeline each fall
   back to a deterministic path when OpenAI is unavailable; the runtime
   backend falls back from Postgres to local SQLite + `.npy` when
@@ -71,15 +69,15 @@ Tested on 30 hand-curated cases (24 QA + 6 timeline), each carrying gold
 `expected_article_ids` and rubric-style `expected_answer_points`. Scored with
 hard retrieval metrics and `gpt-5-mini` LLM-as-judge (0–2 scale per dimension).
 
-| Metric | Baseline | README target |
-|---|---|---|
-| hit@3 | **0.875** | ≥ 0.70 |
-| hit@5 | 0.875 | ≥ 0.85 |
-| MRR | **0.861** | ≥ 0.65 |
-| Judge — answer groundedness | 1.90 / 2.00 | ≥ 1.7 |
-| Judge — answer usefulness | 1.93 / 2.00 | ≥ 1.6 |
-| Judge — citation support | 1.70 / 2.00 | ≥ 1.7 |
-| Judge — timeline quality | 1.71 / 2.00 | ≥ 1.5 |
+| Metric                      | Baseline    | README target |
+| --------------------------- | ----------- | ------------- |
+| hit@3                       | **0.875**   | ≥ 0.70        |
+| hit@5                       | 0.875       | ≥ 0.85        |
+| MRR                         | **0.861**   | ≥ 0.65        |
+| Judge — answer groundedness | 1.90 / 2.00 | ≥ 1.7         |
+| Judge — answer usefulness   | 1.93 / 2.00 | ≥ 1.6         |
+| Judge — citation support    | 1.70 / 2.00 | ≥ 1.7         |
+| Judge — timeline quality    | 1.71 / 2.00 | ≥ 1.5         |
 
 **Ablations**
 
@@ -139,7 +137,7 @@ Full report (methodology, per-dimension tables, reproduce script):
 1. **Guardrail** ([`query_router.py`](ask_the_news/query_router.py)) rejects
    empty queries and obviously context-dependent ones
    (`"what happened before this?"`) when no article is in focus.
-2. **Router** (`gpt-5-nano`) classifies *contextual* vs *global*. Falls back
+2. **Router** (`gpt-5-nano`) classifies _contextual_ vs _global_. Falls back
    to a keyword heuristic when OpenAI is unavailable.
 3. **Retrieval**:
    ```sql
@@ -156,14 +154,14 @@ Full report (methodology, per-dimension tables, reproduce script):
 
 ## Tech stack and rationale
 
-| Layer | Choice | Why |
-|---|---|---|
-| Frontend | Next.js 16 + React 19 + Tailwind v4 | App Router server components for SSR; Vercel hobby tier free |
-| Backend | FastAPI on uvicorn | Async, Pydantic types, free OpenAPI docs at `/docs` |
-| Embeddings | `all-MiniLM-L6-v2` (384-d) | Hits ~85% of larger models' MTEB scores at a fraction of cost, runs on CPU |
-| Vector store | Postgres 17 + pgvector | Relational + vector in one place; one SQL round trip per query |
-| LLMs | `gpt-5-nano` (router) · `gpt-5-mini` (QA, timeline) | Cheap router separates from expensive answerer; both have deterministic fallbacks |
-| Hosting | Vercel (frontend) · HF Space Docker (API) · Neon (DB) | $0/mo total for the live demo |
+| Layer        | Choice                                                | Why                                                                               |
+| ------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Frontend     | Next.js 16 + React 19 + Tailwind v4                   | App Router server components for SSR; Vercel hobby tier free                      |
+| Backend      | FastAPI on uvicorn                                    | Async, Pydantic types, free OpenAPI docs at `/docs`                               |
+| Embeddings   | `all-MiniLM-L6-v2` (384-d)                            | Hits ~85% of larger models' MTEB scores at a fraction of cost, runs on CPU        |
+| Vector store | Postgres 17 + pgvector                                | Relational + vector in one place; one SQL round trip per query                    |
+| LLMs         | `gpt-5-nano` (router) · `gpt-5-mini` (QA, timeline)   | Cheap router separates from expensive answerer; both have deterministic fallbacks |
+| Hosting      | Vercel (frontend) · HF Space Docker (API) · Neon (DB) | $0/mo total for the live demo                                                     |
 
 ## Quick start (local dev)
 
@@ -205,13 +203,13 @@ can iterate offline.
 
 Production base URL: `https://mushroom18-ask-the-news.hf.space`.
 
-| Endpoint | Description |
-|---|---|
-| `GET /health` | `{status, index_ready}` |
-| `GET /featured?limit=24` | latest articles for the carousel |
-| `GET /article/{article_id}` | full article; used when clicking a timeline card |
-| `POST /query` | `{question, current_article_id, top_k}` → `{message, citations, query_mode, ...}` |
-| `POST /timeline` | `{question, current_article_id}` → `{items: TimelineItem[], ...}` |
+| Endpoint                    | Description                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `GET /health`               | `{status, index_ready}`                                                           |
+| `GET /featured?limit=24`    | latest articles for the carousel                                                  |
+| `GET /article/{article_id}` | full article; used when clicking a timeline card                                  |
+| `POST /query`               | `{question, current_article_id, top_k}` → `{message, citations, query_mode, ...}` |
+| `POST /timeline`            | `{question, current_article_id}` → `{items: TimelineItem[], ...}`                 |
 
 Interactive schema at `/docs` (FastAPI auto-generated).
 
@@ -223,11 +221,11 @@ Interactive schema at `/docs` (FastAPI auto-generated).
 first user request doesn't pay the cold-start cost. Push to the `hf` remote
 triggers a rebuild. Required Space secrets:
 
-| Secret | What |
-|---|---|
-| `DATABASE_URL` | Postgres connection string (Neon or otherwise; `?sslmode=require`) |
-| `OPENAI_API_KEY` | Drives the router, QA, and timeline calls |
-| `CORS_ALLOW_ORIGINS` | Comma-separated allowed origins for the frontend |
+| Secret               | What                                                               |
+| -------------------- | ------------------------------------------------------------------ |
+| `DATABASE_URL`       | Postgres connection string (Neon or otherwise; `?sslmode=require`) |
+| `OPENAI_API_KEY`     | Drives the router, QA, and timeline calls                          |
+| `CORS_ALLOW_ORIGINS` | Comma-separated allowed origins for the frontend                   |
 
 ### Frontend — Vercel
 
@@ -272,11 +270,11 @@ frontend/             Next.js 16 app (App Router)
   vercel.json         pins framework = nextjs
 
 evaluation/
-  README.md           full report (baseline + 2 ablations)
-  cases_template.jsonl  30 hand-curated cases
-  judge.py            run cases + LLM-as-judge
-  metrics.py          hard retrieval metrics
-  results_*.jsonl     reproducible run artifacts
+  README.md           full report (baseline + 5 ablation studies)
+  cases_template.jsonl  30 hand-curated cases (gold article ids + answer rubric)
+  judge.py            run cases + LLM-as-judge (--disable-router flag for ablation)
+  metrics.py          hard retrieval metrics (hit@k, MRR, precision@k)
+  results_*.jsonl     reproducible run artifacts (one per ablation)
 
 sql/schema.sql        Postgres tables + pgvector extension
 Dockerfile            HF Space (sdk: docker)
@@ -319,13 +317,19 @@ CORS_ALLOW_ORIGINS=http://localhost:3000,https://your-frontend.vercel.app
 
 ## Roadmap
 
-- [x] **Article-aggregation rerank** — shipped behind `ARTICLE_AGGREGATION` env var
-  (precision@5 +34% relative on the eval set)
-- [x] **Hybrid retrieval** — shipped behind `HYBRID_RETRIEVAL` env var; ablation
-  showed regression on this corpus, kept as opt-in for future query distributions
-- [x] **Cross-encoder reranker** (`bge-reranker-v2-m3`) — shipped behind
-  `RERANKER_ENABLED` env var; trade-off result: hit@5 +4.8% but hit@3 −4.8%
-- [ ] **Auto-ingestion** — GitHub Actions cron pulls new monthly subsets and
-  upserts to Postgres
-- [ ] **Tests + CI** — unit tests for chunking edge cases, retrieval ranking,
-  guardrail; GitHub Actions on every PR
+Done (with eval numbers in [`evaluation/README.md`](evaluation/README.md)):
+
+- [x] **Article-aggregation rerank** — `ARTICLE_AGGREGATION=on` —
+      precision@5 +34% relative
+- [x] **Hybrid retrieval** (BM25 + pgvector + RRF) — `HYBRID_RETRIEVAL=on` —
+      regressed on this corpus, opt-in for future query distributions
+- [x] **Cross-encoder reranker** (`bge-reranker-v2-m3`) — `RERANKER_ENABLED=on` —
+      hit@5 +4.8% / hit@3 −4.8% trade-off
+
+Next:
+
+- [ ] **Auto-ingestion** — GitHub Actions monthly cron streams new BBC
+      subsets and runs `sync-db`
+- [ ] **Larger eval set** — extend from 30 to ~100 cases including more
+      "hard" queries (lexical-precise, multi-hop) where the current
+      ablations would behave differently

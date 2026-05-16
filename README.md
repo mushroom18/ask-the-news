@@ -328,8 +328,18 @@ Done (with eval numbers in [`evaluation/README.md`](evaluation/README.md)):
 
 Next:
 
+- [ ] **Scale corpus to 50K–100K articles** — current 1,500 is enough to
+      validate the pipeline but too small for several optimizations to
+      pay off (brute-force pgvector is still optimal at this size).
+      Plan: bump `MAX_ARTICLES` + add 2-3 years of monthly subsets,
+      upgrade Neon Launch tier (~4 GB), add HNSW index
+      (`USING hnsw (embedding vector_cosine_ops)`), and **re-run all
+      five ablations** at the larger scale. Hybrid retrieval that
+      regressed at 1.5K is expected to flip positive once there are
+      more lexical-precise targets in the candidate pool.
 - [ ] **Auto-ingestion** — GitHub Actions monthly cron streams new BBC
-      subsets and runs `sync-db`
+      subsets and runs `sync-db`; uses `content_hash` for incremental
+      upserts so re-syncs are fast.
 - [ ] **Larger eval set** — extend from 30 to ~100 cases including more
-      "hard" queries (lexical-precise, multi-hop) where the current
-      ablations would behave differently
+      "hard" queries (lexical-precise, multi-hop, ambiguous) where the
+      current ablations would behave differently.

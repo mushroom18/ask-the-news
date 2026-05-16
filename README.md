@@ -103,6 +103,15 @@ hard retrieval metrics and `gpt-5-mini` LLM-as-judge (0–2 scale per dimension)
   vector top-1 results via RRF. Honest negative finding: hybrid is not a
   free lift — it's corpus-dependent. Code shipped behind
   `HYBRID_RETRIEVAL=on` for future query distributions.
+- **Cross-encoder rerank** (`BAAI/bge-reranker-v2-m3`, 2024-vintage SOTA,
+  ~568MB) — two-stage retrieval: pgvector recall → cross-encoder rerank
+  on top-30. **Trade-off, not a clean win**: hit@5 **+4.8%** and the
+  "Kekius Maximus" hard case (where vector returned MRR 0) recovers
+  to MRR 1.0; but hit@3 −4.8% / MRR −7.2% because the cross-encoder
+  reshuffles cases where bi-encoder cosine was already at MRR 1.0. The
+  iteration also caught a real bug — first version passed only the bare
+  `user_query`, dropping the article context contextual queries depend on;
+  fixed by passing `retrieval_text()`. Shipped behind `RERANKER_ENABLED=on`.
 
 Full report (methodology, per-dimension tables, reproduce script):
 [`evaluation/README.md`](evaluation/README.md).
@@ -314,8 +323,8 @@ CORS_ALLOW_ORIGINS=http://localhost:3000,https://your-frontend.vercel.app
   (precision@5 +34% relative on the eval set)
 - [x] **Hybrid retrieval** — shipped behind `HYBRID_RETRIEVAL` env var; ablation
   showed regression on this corpus, kept as opt-in for future query distributions
-- [ ] **Cross-encoder reranker** on top-30 → top-8 to lift the cases where
-  vector retrieves the right article but ranks it 2nd or 3rd
+- [x] **Cross-encoder reranker** (`bge-reranker-v2-m3`) — shipped behind
+  `RERANKER_ENABLED` env var; trade-off result: hit@5 +4.8% but hit@3 −4.8%
 - [ ] **Auto-ingestion** — GitHub Actions cron pulls new monthly subsets and
   upserts to Postgres
 - [ ] **Tests + CI** — unit tests for chunking edge cases, retrieval ranking,

@@ -16,6 +16,8 @@ from ask_the_news.config import (
     HYBRID_RETRIEVAL,
     HYBRID_RRF_K,
     HYBRID_VECTOR_POOL,
+    RERANKER_ENABLED,
+    RERANKER_POOL,
     RETRIEVAL_TOP_K,
     TIMELINE_BUCKET_GRANULARITY,
     TIMELINE_MAX_ARTICLES,
@@ -368,7 +370,24 @@ class PostgresRetrievalBackend(RetrievalBackend):
         return results
 
     def build_qa_context(self, query: QueryBundle, top_k: int = RETRIEVAL_TOP_K) -> QAContext:
-        if ARTICLE_AGGREGATION:
+        # Three QA retrieval modes. Reranker takes precedence over article
+        # aggregation; both override pure vector. Each is meant to be its own
+        # ablation lane, not a stacked pipeline.
+        if RERANKER_ENABLED:
+            from ask_the_news.reranker import default_reranker
+
+            pool = self._search(query, top_k=RERANKER_POOL)
+            # Use retrieval_text() — for contextual queries this includes the
+            # current article's title/section/description so the cross-encoder
+            # has the same context the bi-encoder used to fetch the pool.
+            # Without it, "Who died in this story?" loses all reference and
+            # the rerank scores anything death-related.
+            retrieved_chunks = default_reranker().rerank(
+                query_text=query.retrieval_text(),
+                candidates=pool,
+                top_k=top_k,
+            )
+        elif ARTICLE_AGGREGATION:
             pool = self._search(query, top_k=top_k * ARTICLE_AGGREGATION_POOL_MULT)
             retrieved_chunks = article_aware_chunk_rerank(pool, top_k=top_k)
         else:

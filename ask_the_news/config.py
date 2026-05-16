@@ -37,6 +37,10 @@ HYBRID_RETRIEVAL = os.getenv("HYBRID_RETRIEVAL", "off").strip().lower() == "on"
 HYBRID_BM25_POOL = int(os.getenv("HYBRID_BM25_POOL", "30"))
 HYBRID_VECTOR_POOL = int(os.getenv("HYBRID_VECTOR_POOL", "30"))
 HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
+
+RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "off").strip().lower() == "on"
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_POOL = int(os.getenv("RERANKER_POOL", "30"))
 TIMELINE_RECALL_K = int(os.getenv("TIMELINE_RECALL_K", "30"))
 TIMELINE_MAX_ARTICLES = int(os.getenv("TIMELINE_MAX_ARTICLES", "12"))
 TIMELINE_MAX_PER_BUCKET = int(os.getenv("TIMELINE_MAX_PER_BUCKET", "2"))

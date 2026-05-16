@@ -10,8 +10,9 @@ End-to-end evaluation for the Ask the News RAG pipeline, with ablations.
 | **Baseline answer quality** (LLM-as-judge, 0–2) | groundedness **1.90**, usefulness **1.93**, citations **1.70** |
 | **Router ablation** (router off) | overall hit@3 drops 9% (**0.875 → 0.792**); on contextual queries alone, hit@3 collapses **0.75 → 0.25** |
 | **Chunk-size ablation** (100 / 150 / 180 / 220 words) | hit@3 is identical (0.875) across all four; chunk size is **not** a high-leverage tuning knob on this corpus |
-| **Article-aggregation rerank** (QA path) | precision@5 **0.347 → 0.465 (+34% rel)**, answer_groundedness +0.07; MRR drops 0.035 (right article still found, just not always at rank 1) |
+| **Article-aggregation rerank** (QA path) | precision@5 **0.347 → 0.465 (+34% rel)**, answer_groundedness +0.07; MRR drops 0.035 (right article still found, just not always at rank 1). Win. |
 | **Hybrid retrieval ablation** (BM25 + pgvector + RRF) | **Regressed on this corpus** (hit@3 0.875 → 0.792). Baseline already near ceiling and queries lack lexical-precise terms — BM25 surfaces topical noise that RRF dilutes vector top-1. Honest negative result; reroute to cross-encoder rerank. |
+| **Cross-encoder rerank** (BAAI/bge-reranker-v2-m3) | **Trade-off, not a win** on this corpus. hit@5 **+4.8%**, "Kekius Maximus" hard case recovers MRR 0 → 1.0, but hit@3 −4.8% / MRR −7.2% because rerank reshuffles cases where bi-encoder cosine was already at MRR 1.0. Includes a real bug-fix iteration (had to switch from `user_query` to `retrieval_text()` so contextual queries kept their article context). |
 
 ## Methodology
 
@@ -210,13 +211,74 @@ Per-case hit@3 diff: **0 cases improved, 2 regressed (qa-012, qa-016), 22 unchan
 
 Hybrid retrieval is **not** a free lift. Implemented and shipped behind the `HYBRID_RETRIEVAL` env var (default off) in case query distribution changes. Next-phase optimization moves to cross-encoder reranking, which directly attacks the kind of ranking error vector search makes here (correct article retrieved but pushed down a slot).
 
+## Ablation 5 — Cross-encoder rerank (BAAI/bge-reranker-v2-m3)
+
+Two-stage retrieval. Stage 1: pgvector pulls a candidate pool of 30 chunks. Stage 2: a cross-encoder (`BAAI/bge-reranker-v2-m3`, 2024-vintage, ~568MB, runs on CPU) re-scores each (query, chunk) pair by feeding both through one transformer with full cross-attention. Returns the top-K of the reranked list.
+
+Bi-encoder cosine struggles with the kind of ranking task where two articles are *both* topically relevant and you need to know which one *answers* the question. Cross-encoders are trained on exactly that — MS MARCO, BEIR — so the hypothesis was that rerank would lift MRR / precision on cases where the bi-encoder finds the right article but ranks it 2nd or 3rd.
+
+Code: [`ask_the_news/reranker.py`](../ask_the_news/reranker.py) and the rerank branch in [`PostgresRetrievalBackend.build_qa_context`](../ask_the_news/backends/postgres.py). Gated by `RERANKER_ENABLED=on`.
+
+### Iteration story (the bug we shipped first)
+
+The first run regressed badly on contextual queries:
+
+```
+qa-001 "Who died in this story?"  MRR  1.000 -> 0.200
+```
+
+Root cause: the reranker received `query.user_query` (the bare question), not `query.retrieval_text()` (which in contextual mode includes the current article's title / section / description). Without that context the cross-encoder saw "Who died in this story?" and matched anything death-related; the bi-encoder pool itself had been built *with* the context, so the right chunks were there — they just got reshuffled to the bottom by the rerank.
+
+Fix: pass `query.retrieval_text()` to match the bi-encoder input. After the fix, qa-001 went back to MRR 1.0.
+
+### Results (after the fix)
+
+| Metric | baseline | rerank | Δ |
+|---|---|---|---|
+| hit@3 | 0.875 | 0.833 | −4.8% |
+| **hit@5** | 0.875 | **0.917** | **+4.8%** |
+| MRR | 0.861 | 0.799 | −7.2% |
+| precision@5 | 0.347 | 0.343 | −1.2% |
+| answer_groundedness (judge) | 1.90 | 1.87 | −0.03 |
+| citation_support (judge) | 1.70 | 1.70 | 0 |
+| answer_usefulness (judge) | 1.93 | 1.90 | −0.03 |
+
+Per-case hit@3 vs baseline: **2 improved (qa-004, qa-007), 3 regressed (qa-012, qa-014, qa-019), 19 unchanged.**
+
+### What rerank actually changed
+
+Where it helped:
+
+- **qa-004 "What did Elon Musk do on X at the start of 2025?"** — gold article was the "Kekius Maximus" rebrand piece, which doesn't share salient terms with the question. Bi-encoder MRR was **0** (gold not in any returned position). Cross-encoder MRR went to **1.0**.
+- **qa-007 "What happened before this?"** — a contextual query. MRR 0.167 → 0.333.
+
+Where it hurt:
+
+- **qa-012 "What did the BBC say about how the Ukraine war could end in 2025?"**, **qa-014 "What happened in Kursk in early January 2025?"**, **qa-019 "What happened in the February 2025 hostage and prisoner exchange?"** — all queries where the bi-encoder cosine had MRR 1.0 (gold at rank 1) and the cross-encoder reshuffled the gold down to rank 4+. Several Ukraine / Gaza articles are all topically relevant, and the cross-encoder picked a different "most relevant" than the bi-encoder did.
+
+### Why cross-encoder is a trade-off, not a win, on this corpus
+
+The cross-encoder is making *different* errors than the bi-encoder, not strictly fewer. It rescues cases where bi-encoder cosine missed the right article entirely (qa-004), but it disrupts cases where bi-encoder was already at MRR 1.0. The reason: in a clean topical-news corpus, many queries have one obviously-correct article that cosine recognises perfectly. Reranking adds variance.
+
+Cross-encoder shines when:
+
+- multiple semantically-similar candidates need fine disambiguation (e-commerce, code search, medical literature)
+- baseline recall is the bottleneck (lots of cases where the right doc isn't even in the candidate pool)
+- query/document have significant lexical or stylistic gap (paraphrases, jargon)
+
+Our 30-case BBC eval has a 87.5% bi-encoder hit@3 baseline — the easy cases dominate, so reshuffling them at all is net-negative.
+
+### Takeaway
+
+Shipped behind `RERANKER_ENABLED=on`, default off. Worth flipping on once the eval set adds harder, more ambiguous cases (e.g. queries that span two adjacent articles in a story arc). The `qa-004` recovery proves the model itself works; the corpus just doesn't reward the trade-off yet.
+
 ## What this tells the next iteration
 
 | Optimization | Status | Notes |
 |---|---|---|
 | **Article-aggregation rerank** | ✅ shipped (Ablation 3) | precision@5 +34% on this corpus |
 | **Hybrid retrieval** (BM25 + pgvector + RRF) | ❌ tested, regressed (Ablation 4) | Baseline near ceiling + queries lack lexical-precise terms; kept behind `HYBRID_RETRIEVAL=on` env var for future query distributions |
-| **Cross-encoder reranker** on top-30 → top-8 | 🔜 next | Most promising: directly attacks the kind of error where vector retrieves the right article but ranks it 2nd or 3rd |
+| **Cross-encoder reranker** on top-30 → top-8 | ❌ tested, trade-off (Ablation 5) | hit@5 +4.8% but hit@3/MRR drop; corpus too easy for the model's strength |
 | **Query rewriting** | low priority | Router already injects article context for contextual queries |
 | Chunk-size tuning | ❌ tested, no signal (Ablation 2) | Skip |
 | Larger / domain-tuned embedding model | Low — `all-MiniLM-L6-v2` already hits 87.5% hit@3 | Medium |
@@ -253,6 +315,11 @@ python -m ask_the_news.admin init-db   # idempotent: adds ts + GIN index
 HYBRID_RETRIEVAL=on python evaluation/judge.py \
   --cases evaluation/cases_template.jsonl \
   --output evaluation/results_hybrid.jsonl
+
+# Cross-encoder rerank ablation (first run downloads ~568MB model)
+RERANKER_ENABLED=on python evaluation/judge.py \
+  --cases evaluation/cases_template.jsonl \
+  --output evaluation/results_rerank.jsonl
 ```
 
 ## Case schema
@@ -277,3 +344,4 @@ Each line in `cases_template.jsonl` is a JSON object:
 - `results_chunk{100,150,220}.jsonl` — chunk-size ablations
 - `results_article_agg.jsonl` — article-aggregation rerank ablation
 - `results_hybrid.jsonl` — BM25 + vector + RRF hybrid retrieval ablation
+- `results_rerank.jsonl` — cross-encoder rerank ablation (bge-reranker-v2-m3)
